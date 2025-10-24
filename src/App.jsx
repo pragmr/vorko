@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-// import { Room as LiveKitRoom, createLocalAudioTrack } from 'livekit-client';
 import { io } from 'socket.io-client';
 import Auth from './components/Auth';
 import OfficeGrid from './components/OfficeGrid';
@@ -7,6 +6,7 @@ import Character from './components/Character';
 import Controls from './components/Controls';
 import ChatPanel from './components/ChatPanel';
 import RoomInfo from './components/RoomInfo';
+import LiveKitMediaComponent from './components/LiveKitMediaComponent';
 import { officeLayout, officeObjects } from './data/officeData';
 
 function App() {
@@ -398,7 +398,8 @@ function App() {
       try { localMicStreamRef.current?.getTracks()?.forEach(t => t.stop()); } catch {}
       localMicStreamRef.current = null;
       setIsMicOn(false);
-      try { socket?.emit('stop-audio'); } catch {}
+      // Socket.IO emit removed - LiveKit handles all media now
+      // try { socket?.emit('stop-audio'); } catch {}
       // Close all listener peer connections
       for (const [, pc] of speakerPeerConnsRef.current) {
         try { pc.close(); } catch {}
@@ -411,7 +412,8 @@ function App() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
       localMicStreamRef.current = stream;
       setIsMicOn(true);
-      socket?.emit('start-audio');
+      // Socket.IO emit removed - LiveKit handles all media now
+      // socket?.emit('start-audio');
     } catch (e) {
       addToast('Mic permission denied or unavailable.', 'error');
       setIsMicOn(false);
@@ -690,30 +692,32 @@ function App() {
       try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
     };
 
-    socket.on('screenshare-active', onActive);
-    socket.on('screenshare-started', onStarted);
-    socket.on('screenshare-stopped', onStopped);
-    socket.on('screenshare-subscribe', onSubscribe);
-    socket.on('screenshare-unsubscribe', onUnsubscribe);
-    socket.on('webrtc-offer', onOffer);
-    socket.on('webrtc-answer', onAnswer);
+    // Socket.IO screen share handlers removed - LiveKit handles all media now
+    // socket.on('screenshare-active', onActive);
+    // socket.on('screenshare-started', onStarted);
+    // socket.on('screenshare-stopped', onStopped);
+    // socket.on('screenshare-subscribe', onSubscribe);
+    // socket.on('screenshare-unsubscribe', onUnsubscribe);
+    // socket.on('webrtc-offer', onOffer);
+    // socket.on('webrtc-answer', onAnswer);
     const onWatchers = ({ sharerId, watchers }) => {
       setWatchersBySharerId(prev => ({ ...prev, [sharerId]: Array.isArray(watchers) ? watchers : [] }));
     };
 
-    socket.on('webrtc-ice-candidate', onIce);
-    socket.on('screenshare-watchers', onWatchers);
+    // socket.on('webrtc-ice-candidate', onIce);
+    // socket.on('screenshare-watchers', onWatchers);
 
     return () => {
-      socket.off('screenshare-active', onActive);
-      socket.off('screenshare-started', onStarted);
-      socket.off('screenshare-stopped', onStopped);
-      socket.off('screenshare-subscribe', onSubscribe);
-      socket.off('screenshare-unsubscribe', onUnsubscribe);
-      socket.off('webrtc-offer', onOffer);
-      socket.off('webrtc-answer', onAnswer);
-      socket.off('webrtc-ice-candidate', onIce);
-      socket.off('screenshare-watchers', onWatchers);
+      // Socket.IO screen share cleanup removed - LiveKit handles all media now
+      // socket.off('screenshare-active', onActive);
+      // socket.off('screenshare-started', onStarted);
+      // socket.off('screenshare-stopped', onStopped);
+      // socket.off('screenshare-subscribe', onSubscribe);
+      // socket.off('screenshare-unsubscribe', onUnsubscribe);
+      // socket.off('webrtc-offer', onOffer);
+      // socket.off('webrtc-answer', onAnswer);
+      // socket.off('webrtc-ice-candidate', onIce);
+      // socket.off('screenshare-watchers', onWatchers);
     };
   }, [socket, users, isSharingScreen]);
 
@@ -841,24 +845,26 @@ function App() {
       try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
     };
 
-    socket.on('audio-active', onActive);
-    socket.on('audio-started', onStarted);
-    socket.on('audio-stopped', onStopped);
-    socket.on('audio-subscribe', onSubscribe);
-    socket.on('audio-unsubscribe', onUnsubscribe);
-    socket.on('audio-webrtc-offer', onOffer);
-    socket.on('audio-webrtc-answer', onAnswer);
-    socket.on('audio-ice-candidate', onIce);
+    // Socket.IO audio handlers removed - LiveKit handles all media now
+    // socket.on('audio-active', onActive);
+    // socket.on('audio-started', onStarted);
+    // socket.on('audio-stopped', onStopped);
+    // socket.on('audio-subscribe', onSubscribe);
+    // socket.on('audio-unsubscribe', onUnsubscribe);
+    // socket.on('audio-webrtc-offer', onOffer);
+    // socket.on('audio-webrtc-answer', onAnswer);
+    // socket.on('audio-ice-candidate', onIce);
 
     return () => {
-      socket.off('audio-active', onActive);
-      socket.off('audio-started', onStarted);
-      socket.off('audio-stopped', onStopped);
-      socket.off('audio-subscribe', onSubscribe);
-      socket.off('audio-unsubscribe', onUnsubscribe);
-      socket.off('audio-webrtc-offer', onOffer);
-      socket.off('audio-webrtc-answer', onAnswer);
-      socket.off('audio-ice-candidate', onIce);
+      // Socket.IO audio cleanup removed - LiveKit handles all media now
+      // socket.off('audio-active', onActive);
+      // socket.off('audio-started', onStarted);
+      // socket.off('audio-stopped', onStopped);
+      // socket.off('audio-subscribe', onSubscribe);
+      // socket.off('audio-unsubscribe', onUnsubscribe);
+      // socket.off('audio-webrtc-offer', onOffer);
+      // socket.off('audio-webrtc-answer', onAnswer);
+      // socket.off('audio-ice-candidate', onIce);
     };
   }, [socket, users, isMicOn]);
 
@@ -972,24 +978,26 @@ function App() {
       try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
     };
 
-    socket.on('video-active', onActive);
-    socket.on('video-started', onStarted);
-    socket.on('video-stopped', onStopped);
-    socket.on('video-subscribe', onSubscribe);
-    socket.on('video-unsubscribe', onUnsubscribe);
-    socket.on('video-webrtc-offer', onOffer);
-    socket.on('video-webrtc-answer', onAnswer);
-    socket.on('video-ice-candidate', onIce);
+    // Socket.IO video handlers removed - LiveKit handles all media now
+    // socket.on('video-active', onActive);
+    // socket.on('video-started', onStarted);
+    // socket.on('video-stopped', onStopped);
+    // socket.on('video-subscribe', onSubscribe);
+    // socket.on('video-unsubscribe', onUnsubscribe);
+    // socket.on('video-webrtc-offer', onOffer);
+    // socket.on('video-webrtc-answer', onAnswer);
+    // socket.on('video-ice-candidate', onIce);
 
     return () => {
-      socket.off('video-active', onActive);
-      socket.off('video-started', onStarted);
-      socket.off('video-stopped', onStopped);
-      socket.off('video-subscribe', onSubscribe);
-      socket.off('video-unsubscribe', onUnsubscribe);
-      socket.off('video-webrtc-offer', onOffer);
-      socket.off('video-webrtc-answer', onAnswer);
-      socket.off('video-ice-candidate', onIce);
+      // Socket.IO video cleanup removed - LiveKit handles all media now
+      // socket.off('video-active', onActive);
+      // socket.off('video-started', onStarted);
+      // socket.off('video-stopped', onStopped);
+      // socket.off('video-subscribe', onSubscribe);
+      // socket.off('video-unsubscribe', onUnsubscribe);
+      // socket.off('video-webrtc-offer', onOffer);
+      // socket.off('video-webrtc-answer', onAnswer);
+      // socket.off('video-ice-candidate', onIce);
     };
   }, [socket, users, isCamOn]);
 
@@ -1465,6 +1473,20 @@ function App() {
             />
           ))}
       </OfficeGrid>
+      
+      {/* LiveKit Media Component - Replaces Socket.IO WebRTC */}
+      {user && (
+        <LiveKitMediaComponent
+          currentRoom={currentRoom}
+          userPosition={user.position}
+          users={users}
+          socket={socket}
+          onMediaStateChange={(state) => {
+            // Handle media state changes if needed
+            console.log('LiveKit media state changed:', state);
+          }}
+        />
+      )}
       
       <Controls 
         onJoinOffice={handleJoinOffice}

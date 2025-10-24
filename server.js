@@ -213,13 +213,18 @@ app.post('/api/livekit/token', async (req, res) => {
   const { room, identity, name } = req.body || {};
   if (!room) return res.status(400).json({ error: 'room is required' });
 
-  // Optional proximity validation for pair rooms
-  // Expected format: `${officeRoom}__pair__${socketIdA}__${socketIdB}`
+  // Optional proximity validation for pair rooms and proximity rooms
+  // Expected formats: 
+  // - `${officeRoom}__pair__${socketIdA}__${socketIdB}` (for pair rooms)
+  // - `${officeRoom}__proximity__${mediaType}` (for proximity rooms)
   try {
-    const parts = String(room).split('__pair__');
-    if (parts.length === 2) {
-      const officeRoom = parts[0];
-      const [sidA, sidB] = parts[1].split('__');
+    const roomParts = String(room).split('__');
+    
+    if (roomParts.length >= 3 && roomParts[1] === 'pair') {
+      // Proximity pair room: `${officeRoom}__pair__${socketIdA}__${socketIdB}`
+      const officeRoom = roomParts[0];
+      const [sidA, sidB] = roomParts.slice(2);
+      
       if (!sidA || !sidB) {
         return res.status(400).json({ error: 'invalid pair room format' });
       }
@@ -239,6 +244,7 @@ app.post('/api/livekit/token', async (req, res) => {
       if (a.room !== officeRoom || b.room !== officeRoom) {
         return res.status(403).json({ error: 'participants not in same office room' });
       }
+      
       // Euclidean distance in grid tiles
       const dx = (a.position?.x || 0) - (b.position?.x || 0);
       const dy = (a.position?.y || 0) - (b.position?.y || 0);
@@ -246,6 +252,24 @@ app.post('/api/livekit/token', async (req, res) => {
       const RADIUS = 3; // tiles
       if (distance > RADIUS) {
         return res.status(403).json({ error: 'participants not within proximity radius' });
+      }
+    } else if (roomParts.length >= 2 && roomParts[1] === 'proximity') {
+      // Proximity room: `${officeRoom}__proximity__${mediaType}`
+      const officeRoom = roomParts[0];
+      const mediaType = roomParts[2] || 'all';
+      
+      // Validate user is in the office room
+      const userSocketIds = Array.from(connectedUsers.entries())
+        .filter(([sid, u]) => u.userId === payload.userId)
+        .map(([sid]) => sid);
+      
+      if (userSocketIds.length === 0) {
+        return res.status(404).json({ error: 'user not online' });
+      }
+      
+      const userSocket = connectedUsers.get(userSocketIds[0]);
+      if (!userSocket || userSocket.room !== officeRoom) {
+        return res.status(403).json({ error: 'user not in correct office room' });
       }
     }
   } catch (err) {
