@@ -33,7 +33,10 @@ class LiveKitService {
 
       // Create room instance
       this.room = new Room();
-      console.log('🏠 Room instance created');
+      
+      // Increase max listeners to prevent memory leak warnings
+      this.room.setMaxListeners(20);
+      console.log('🏠 Room instance created with increased listener limit');
       
       // Set up event listeners BEFORE connecting
       this.setupEventListeners();
@@ -104,6 +107,9 @@ class LiveKitService {
   setupEventListeners() {
     if (!this.room) return;
 
+    // Remove existing listeners first to prevent memory leaks
+    this.removeEventListeners();
+
     this.room.on(RoomEvent.Connected, () => {
       console.log('✅ LiveKit connected event fired');
       console.log('🔍 Room state after connect:', this.room.state);
@@ -159,6 +165,14 @@ class LiveKitService {
     });
   }
 
+  // Remove event listeners to prevent memory leaks
+  removeEventListeners() {
+    if (!this.room) return;
+    
+    this.room.removeAllListeners();
+    console.log('🧹 Removed all LiveKit event listeners');
+  }
+
   // Publish audio track
   async publishAudio() {
     if (!this.room || !this.isConnected) {
@@ -204,18 +218,31 @@ class LiveKitService {
     }
     
     try {
+      console.log('📹 Creating local video track...');
+      
+      // Check if video track already exists
+      if (this.localTracks.has('video')) {
+        console.log('⚠️ Video track already exists, unpublishing first...');
+        await this.unpublishTrack('video');
+      }
+      
       const { createLocalVideoTrack } = await import('livekit-client');
       const videoTrack = await createLocalVideoTrack({
         resolution: { width: 640, height: 480 },
         frameRate: 30,
       });
       
+      console.log('📡 Publishing video track to room...');
       await this.room.localParticipant.publishTrack(videoTrack);
       this.localTracks.set('video', videoTrack);
-      console.log('Video track published');
+      console.log('✅ Video track published successfully');
       return videoTrack;
     } catch (error) {
-      console.error('Failed to publish video:', error);
+      console.error('❌ Failed to publish video:', error);
+      // Clean up on error
+      if (this.localTracks.has('video')) {
+        this.localTracks.delete('video');
+      }
       throw error;
     }
   }
@@ -227,6 +254,14 @@ class LiveKitService {
     }
     
     try {
+      console.log('🖥️ Creating screen share tracks...');
+      
+      // Check if screen track already exists
+      if (this.localTracks.has('screen')) {
+        console.log('⚠️ Screen track already exists, unpublishing first...');
+        await this.unpublishTrack('screen');
+      }
+      
       const { createLocalScreenTracks } = await import('livekit-client');
       const screenTracks = await createLocalScreenTracks({
         video: {
@@ -238,15 +273,21 @@ class LiveKitService {
         audio: false
       });
       
+      console.log('📡 Publishing screen tracks to room...');
       for (const track of screenTracks) {
         await this.room.localParticipant.publishTrack(track);
+        console.log('✅ Screen track published:', track.kind, track.source);
       }
       
       this.localTracks.set('screen', screenTracks);
-      console.log('Screen share published');
+      console.log('✅ Screen share published successfully');
       return screenTracks;
     } catch (error) {
-      console.error('Failed to publish screen share:', error);
+      console.error('❌ Failed to publish screen share:', error);
+      // Clean up on error
+      if (this.localTracks.has('screen')) {
+        this.localTracks.delete('screen');
+      }
       throw error;
     }
   }
@@ -379,6 +420,9 @@ class LiveKitService {
             console.warn(`Error stopping ${trackType} track:`, error);
           }
         }
+        
+        // Remove event listeners before disconnecting
+        this.removeEventListeners();
         
         // Disconnect from room
         await this.room.disconnect();

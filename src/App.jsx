@@ -7,6 +7,7 @@ import Controls from './components/Controls';
 import ChatPanel from './components/ChatPanel';
 import RoomInfo from './components/RoomInfo';
 import LiveKitMediaComponent from './components/LiveKitMediaComponent';
+import { useLiveKitMedia } from './hooks/useLiveKitMedia';
 import { officeLayout, officeObjects } from './data/officeData';
 
 function App() {
@@ -66,6 +67,9 @@ function App() {
   const videoBroadcasterPCsRef = useRef(new Map()); // as broadcaster: viewerSocketId -> RTCPeerConnection
   const videoViewerPCsRef = useRef(new Map()); // as viewer: broadcasterSocketId -> RTCPeerConnection
   const [activeBroadcasterIds, setActiveBroadcasterIds] = useState([]);
+
+  // LiveKit integration
+  const liveKitMedia = useLiveKitMedia(currentRoom, user?.position, users);
 
   function playNotificationSound() {
     try {
@@ -334,138 +338,64 @@ function App() {
     dockScreenTileToTop(sharerId);
   }
 
+  // Screen share - Now uses LiveKit
   async function toggleScreenShare() {
-    if (isSharingScreen) {
-      // Stop
-      try {
-        localScreenStreamRef.current?.getTracks()?.forEach(t => t.stop());
-      } catch {}
-      localScreenStreamRef.current = null;
-      setIsSharingScreen(false);
-      try { socket?.emit('stop-screenshare'); } catch {}
-      // Close all viewer peer connections
-      for (const [, pc] of sharerPeerConnsRef.current) {
-        try { pc.close(); } catch {}
-      }
-      sharerPeerConnsRef.current.clear();
-      return;
-    }
-
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: 'monitor',
-          frameRate: { ideal: 30, max: 60 },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
-        audio: false
-      });
-      localScreenStreamRef.current = stream;
-      setIsSharingScreen(true);
-      // Auto stop if user ends via browser UX
-      const [track] = stream.getVideoTracks();
-      if (track) {
-        try {
-          const senderParams = track.getSettings?.() || {};
-          // Optional: tweak encoding on actual sender per peer later via setParameters
-        } catch {}
-        track.onended = () => {
-          setIsSharingScreen(false);
-          try { socket?.emit('stop-screenshare'); } catch {}
-          for (const [, pc] of sharerPeerConnsRef.current) {
-            try { pc.close(); } catch {}
-          }
-          sharerPeerConnsRef.current.clear();
-          localScreenStreamRef.current = null;
-        };
-      }
-      socket?.emit('start-screenshare');
-    } catch (e) {
-      if (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) {
-        addToast('Screen capture permission denied. You can try again.', 'error');
+      if (liveKitMedia.isScreenOn) {
+        console.log('🖥️ Stopping LiveKit screen share...');
+        await liveKitMedia.stopScreenShare();
       } else {
-        addToast('Failed to start screen share.', 'error');
+        console.log('🖥️ Starting LiveKit screen share...');
+        await liveKitMedia.startScreenShare();
       }
-      setIsSharingScreen(false);
-      localScreenStreamRef.current = null;
+    } catch (error) {
+      console.error('❌ Failed to toggle LiveKit screen share:', error);
+      addToast('Failed to toggle screen share. Please try again.', 'error');
     }
   }
 
-  // Mic: start/stop and proximity auto-subscribe
+  // Mic: start/stop - Now uses LiveKit
   async function toggleMic() {
-    if (isMicOn) {
-      try { localMicStreamRef.current?.getTracks()?.forEach(t => t.stop()); } catch {}
-      localMicStreamRef.current = null;
-      setIsMicOn(false);
-      // Socket.IO emit removed - LiveKit handles all media now
-      // try { socket?.emit('stop-audio'); } catch {}
-      // Close all listener peer connections
-      for (const [, pc] of speakerPeerConnsRef.current) {
-        try { pc.close(); } catch {}
-      }
-      speakerPeerConnsRef.current.clear();
-      return;
-    }
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
-      localMicStreamRef.current = stream;
-      setIsMicOn(true);
-      // Socket.IO emit removed - LiveKit handles all media now
-      // socket?.emit('start-audio');
-    } catch (e) {
-      addToast('Mic permission denied or unavailable.', 'error');
-      setIsMicOn(false);
-      localMicStreamRef.current = null;
+      if (liveKitMedia.isMicOn) {
+        console.log('🔇 Stopping LiveKit audio...');
+        await liveKitMedia.stopAudio();
+      } else {
+        console.log('🎤 Starting LiveKit audio...');
+        await liveKitMedia.startAudio();
+      }
+    } catch (error) {
+      console.error('❌ Failed to toggle LiveKit microphone:', error);
+      addToast('Failed to toggle microphone. Please try again.', 'error');
     }
   }
 
-  // Camera: start/stop
+  // Camera: start/stop - Now uses LiveKit
   async function toggleCamera() {
-    if (isCamOn) {
-      try { localCamStreamRef.current?.getTracks()?.forEach(t => t.stop()); } catch {}
-      localCamStreamRef.current = null;
-      setIsCamOn(false);
-      try { socket?.emit('stop-video'); } catch {}
-      for (const [, pc] of videoBroadcasterPCsRef.current) {
-        try { pc.close(); } catch {}
-      }
-      videoBroadcasterPCsRef.current.clear();
-      // remove self preview
-      try { videoViewerStreamsRef.current.delete(user?.id); } catch {}
-      removeVideoTile(user?.id);
-      if (fullScreenVideoId === user?.id) setFullScreenVideoId(null);
-      return;
-    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 360 } }, audio: false });
-      localCamStreamRef.current = stream;
-      setIsCamOn(true);
-      socket?.emit('start-video');
-      // set up self preview tile
-      if (user?.id) {
-        videoViewerStreamsRef.current.set(user.id, stream);
-        ensureVideoTile(user.id, user.name || 'Camera');
-        if (!fullScreenVideoId) setFullScreenVideoId(user.id);
+      if (liveKitMedia.isCamOn) {
+        console.log('📹 Stopping LiveKit video...');
+        await liveKitMedia.stopVideo();
+      } else {
+        console.log('📹 Starting LiveKit video...');
+        await liveKitMedia.startVideo();
       }
-    } catch (e) {
-      addToast('Camera permission denied or unavailable.', 'error');
-      setIsCamOn(false);
-      localCamStreamRef.current = null;
+    } catch (error) {
+      console.error('❌ Failed to toggle LiveKit camera:', error);
+      addToast('Failed to toggle camera. Please try again.', 'error');
     }
   }
 
   // Quick end button: turn off mic, camera, and screen share (Meet-style hang up)
   function endAllMedia() {
     try {
-      if (isMicOn) toggleMic();
+      if (liveKitMedia.isMicOn) toggleMic();
     } catch {}
     try {
-      if (isCamOn) toggleCamera();
+      if (liveKitMedia.isCamOn) toggleCamera();
     } catch {}
     try {
-      if (isSharingScreen) toggleScreenShare();
+      if (liveKitMedia.isScreenOn) toggleScreenShare();
     } catch {}
   }
 
@@ -1664,12 +1594,12 @@ function App() {
       {user && !fullScreenSharerId && !fullScreenVideoId && (
         <div className="meet-controls" aria-label="Call controls">
           <button
-            className={`meet-btn ${isMicOn ? 'active' : ''}`}
-            aria-label={isMicOn ? 'Turn off microphone' : 'Turn on microphone'}
-            title={isMicOn ? 'Turn off microphone' : 'Turn on microphone'}
+            className={`meet-btn ${liveKitMedia.isMicOn ? 'active' : ''}`}
+            aria-label={liveKitMedia.isMicOn ? 'Turn off microphone' : 'Turn on microphone'}
+            title={liveKitMedia.isMicOn ? 'Turn off microphone' : 'Turn on microphone'}
             onClick={toggleMic}
           >
-            {isMicOn ? (
+            {liveKitMedia.isMicOn ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 14a4 4 0 0 0 4-4V7a4 4 0 1 0-8 0v3a4 4 0 0 0 4 4Z" stroke="currentColor" strokeWidth="2"/>
                 <path d="M19 11a7 7 0 0 1-14 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
@@ -1685,12 +1615,12 @@ function App() {
             )}
           </button>
           <button
-            className={`meet-btn ${isCamOn ? 'active' : ''}`}
-            aria-label={isCamOn ? 'Turn off camera' : 'Turn on camera'}
-            title={isCamOn ? 'Turn off camera' : 'Turn on camera'}
+            className={`meet-btn ${liveKitMedia.isCamOn ? 'active' : ''}`}
+            aria-label={liveKitMedia.isCamOn ? 'Turn off camera' : 'Turn on camera'}
+            title={liveKitMedia.isCamOn ? 'Turn off camera' : 'Turn on camera'}
             onClick={toggleCamera}
           >
-            {isCamOn ? (
+            {liveKitMedia.isCamOn ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect x="3" y="6" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="2"/>
                 <path d="M21 8v8l-4-3-2-1 2-1 4-3Z" fill="currentColor"/>
@@ -1704,12 +1634,12 @@ function App() {
             )}
           </button>
           <button
-            className={`meet-btn ${isSharingScreen ? 'active' : ''}`}
-            aria-label={isSharingScreen ? 'Stop presenting' : 'Present now'}
-            title={isSharingScreen ? 'Stop presenting' : 'Present now'}
+            className={`meet-btn ${liveKitMedia.isScreenOn ? 'active' : ''}`}
+            aria-label={liveKitMedia.isScreenOn ? 'Stop presenting' : 'Present now'}
+            title={liveKitMedia.isScreenOn ? 'Stop presenting' : 'Present now'}
             onClick={toggleScreenShare}
           >
-            {isSharingScreen ? (
+            {liveKitMedia.isScreenOn ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2"/>
                 <path d="M12 20v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>

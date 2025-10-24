@@ -24,6 +24,8 @@ const LiveKitMediaComponent = ({
       stopVideo,
       startScreenShare,
       stopScreenShare,
+      joinProximityRoom,
+      leaveProximityRoom,
       service
     } = useLiveKitMedia(currentRoom, userPosition, users);
 
@@ -81,10 +83,10 @@ const LiveKitMediaComponent = ({
     }
   };
 
-  // Render audio elements for proximity participants
+  // Render audio elements for LiveKit participants
   const renderAudioElements = () => {
-    return proximityParticipants.map(participant => {
-      const elementId = `audio-microphone-${participant.id}`;
+    return participants.map(participant => {
+      const elementId = `audio-microphone-${participant.identity}`;
       return (
         <audio
           key={elementId}
@@ -98,10 +100,10 @@ const LiveKitMediaComponent = ({
     });
   };
 
-  // Render video elements for proximity participants
+  // Render video elements for LiveKit participants
   const renderVideoElements = () => {
-    return proximityParticipants.map(participant => {
-      const elementId = `video-camera-${participant.id}`;
+    return participants.map(participant => {
+      const elementId = `video-camera-${participant.identity}`;
       return (
         <video
           key={elementId}
@@ -120,9 +122,9 @@ const LiveKitMediaComponent = ({
     });
   };
 
-  // Render screen share elements
+  // Render screen share elements for LiveKit participants
   const renderScreenShareElements = () => {
-    return proximityParticipants
+    return participants
       .filter(participant => {
         try {
           return service.hasTrack(participant, 'video', 'screen_share');
@@ -132,7 +134,7 @@ const LiveKitMediaComponent = ({
         }
       })
       .map(participant => {
-        const elementId = `video-screen_share-${participant.id}`;
+        const elementId = `video-screen_share-${participant.identity}`;
         return (
           <video
             key={elementId}
@@ -185,7 +187,8 @@ const LiveKitMediaComponent = ({
 
       {/* Status Info */}
       <div className="proximity-info">
-        <p>Proximity Participants: {proximityParticipants.length}</p>
+        <p>LiveKit Participants: {participants.length}</p>
+        <p>Proximity Users: {proximityParticipants.length}</p>
         <p>LiveKit Room: {isConnected ? '✅ Connected' : '❌ Disconnected'}</p>
         {isLoading && <p>🔄 Connecting...</p>}
         {error && <p style={{ color: '#ff6b6b' }}>❌ Error: {error}</p>}
@@ -203,55 +206,73 @@ const LiveKitMediaComponent = ({
           <p>Room: {currentRoom}</p>
           <p>Position: {userPosition ? `${userPosition.x}, ${userPosition.y}` : 'None'}</p>
           <p>Service Connected: {service?.isConnected ? 'Yes' : 'No'}</p>
+          <p>Mic State: {isMicOn ? '🎤 ON' : '🎤 OFF'}</p>
+          <p>Cam State: {isCamOn ? '📹 ON' : '📹 OFF'}</p>
+          <p>Screen State: {isScreenOn ? '🖥️ ON' : '🖥️ OFF'}</p>
+          {participants.length > 0 && (
+            <div>
+              <p>LiveKit Participants:</p>
+              {participants.map(p => (
+                <p key={p.identity} style={{ marginLeft: '10px', fontSize: '9px' }}>
+                  • {p.identity} (Audio: {service.hasTrack(p, 'audio', 'microphone') ? '✅' : '❌'})
+                </p>
+              ))}
+            </div>
+          )}
         </div>
         
-        {/* Test Connection Button */}
-        <button 
-          onClick={async () => {
-            console.log('🧪 Testing LiveKit connection...');
-            try {
-              // Test basic connection first
-              console.log('🔍 Testing service state:', { 
-                isConnected: service?.isConnected, 
-                hasRoom: !!service?.room,
-                currentRoom,
-                proximityParticipants: proximityParticipants.length
-              });
-              
-              await service.initializeRoom(currentRoom, 'audio', `test-${Date.now()}`, 'Test User');
-              console.log('✅ Test connection successful');
-              
-              // Test audio track creation
-              console.log('🎤 Testing audio track creation...');
-              const audioTrack = await service.publishAudio();
-              console.log('✅ Audio track test successful:', audioTrack);
-              
-              // Clean up test track
-              await service.unpublishTrack('audio');
-              console.log('🧹 Test cleanup completed');
-              
-            } catch (err) {
-              console.error('❌ Test connection failed:', err);
-              console.error('Error details:', {
-                message: err.message,
-                stack: err.stack,
-                name: err.name
-              });
-            }
-          }}
-          style={{ 
-            marginTop: '5px', 
-            padding: '5px 10px', 
-            fontSize: '10px',
-            background: '#333',
-            color: 'white',
-            border: 'none',
-            borderRadius: '3px',
-            cursor: 'pointer'
-          }}
-        >
-          🧪 Test Connection
-        </button>
+        {/* Manual Connection Controls */}
+        <div style={{ marginTop: '10px', padding: '10px', background: 'rgba(255,255,255,0.1)', borderRadius: '5px' }}>
+          <p style={{ fontSize: '12px', margin: '0 0 5px 0' }}>Manual Controls:</p>
+          <button 
+            onClick={async () => {
+              console.log('🔗 Manual connect to LiveKit room...');
+              try {
+                await joinProximityRoom('all');
+                console.log('✅ Manual connection successful');
+              } catch (err) {
+                console.error('❌ Manual connection failed:', err);
+              }
+            }}
+            disabled={isConnected || isLoading}
+            style={{ 
+              marginRight: '5px',
+              padding: '5px 10px', 
+              fontSize: '10px',
+              background: isConnected ? '#666' : '#4CAF50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '3px',
+              cursor: isConnected ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {isConnected ? '✅ Connected' : '🔗 Connect'}
+          </button>
+          
+          <button 
+            onClick={async () => {
+              console.log('🔌 Manual disconnect from LiveKit room...');
+              try {
+                await leaveProximityRoom();
+                console.log('✅ Manual disconnect successful');
+              } catch (err) {
+                console.error('❌ Manual disconnect failed:', err);
+              }
+            }}
+            disabled={!isConnected}
+            style={{ 
+              padding: '5px 10px', 
+              fontSize: '10px',
+              background: !isConnected ? '#666' : '#f44336',
+              color: 'white',
+              border: 'none',
+              borderRadius: '3px',
+              cursor: !isConnected ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {!isConnected ? '❌ Disconnected' : '🔌 Disconnect'}
+          </button>
+        </div>
       </div>
 
       {/* Audio Elements (hidden) */}
