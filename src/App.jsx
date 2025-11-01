@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-// import { Room as LiveKitRoom, createLocalAudioTrack } from 'livekit-client';
+import { Room as LiveKitRoom, createLocalScreenTracks, RemoteTrack, RemoteTrackPublication, Track } from 'livekit-client';
 import { io } from 'socket.io-client';
 import Auth from './components/Auth';
 import OfficeGrid from './components/OfficeGrid';
@@ -30,14 +30,15 @@ function App() {
   const [autoPath, setAutoPath] = useState([]); // array of {x,y} to walk to
   const [isWalking, setIsWalking] = useState(false);
   
-  // Screen share and WebRTC state
+  // Screen share and LiveKit state
   const [isSharingScreen, setIsSharingScreen] = useState(false);
-  const localScreenStreamRef = useRef(null);
-  const sharerPeerConnsRef = useRef(new Map()); // as sharer: viewerSocketId -> RTCPeerConnection
-  const viewerPeerConnsRef = useRef(new Map()); // as viewer: sharerSocketId -> RTCPeerConnection
+  const localScreenTracksRef = useRef([]); // Local screen share tracks
+  const localScreenStreamRef = useRef(null); // Local screen share MediaStream (created from tracks for preview)
+  const lkScreenShareRoomRef = useRef(null); // LiveKit Room for screen sharing
   const [activeSharerIds, setActiveSharerIds] = useState([]); // socket ids in my room currently sharing
   const [screenTiles, setScreenTiles] = useState({}); // { [sharerId]: { left, top, width, height, visible, title, ended } }
   const viewerStreamsRef = useRef(new Map()); // as viewer: sharerSocketId -> MediaStream
+  const subscribedRemoteScreenTracksRef = useRef(new Map()); // Track remote screen track subscriptions
   const [fullScreenSharerId, setFullScreenSharerId] = useState(null);
   const [fsControlsVisible, setFsControlsVisible] = useState(true);
   const fsHideTimerRef = useRef(null);
@@ -334,60 +335,332 @@ function App() {
     dockScreenTileToTop(sharerId);
   }
 
+  // Helper function to setup LiveKit room event handlers
+  function setupLiveKitRoomHandlers(room) {
+    if (!room) return;
+
+    // Remove existing handlers first to avoid duplicates
+    room.removeAllListeners('trackPublished');
+    room.removeAllListeners('trackSubscribed');
+    room.removeAllListeners('trackUnsubscribed');
+    room.removeAllListeners('participantConnected');
+    room.removeAllListeners('participantDisconnected');
+
+    // Handle remote tracks being published
+    room.on('trackPublished', async (publication, participant) => {
+      // Subscribe to screen share tracks automatically
+      if (publication.kind === 'video' && publication.source === Track.Source.ScreenShare) {
+        const sharerId = participant.identity;
+        if (sharerId && sharerId !== socket.id && !publication.isSubscribed) {
+          try {
+            await publication.setSubscribed(true);
+          } catch (e) {
+            console.error('Error subscribing to published track:', e);
+          }
+        }
+      }
+    });
+
+    // Handle track subscription
+    room.on('trackSubscribed', (track, publication, participant) => {
+      if (track.kind === 'video' && track.source === Track.Source.ScreenShare) {
+        const sharerId = participant.identity;
+        if (!sharerId || sharerId === socket.id) return; // Skip own tracks
+
+        // Create MediaStream from track's mediaStreamTrack
+        const mediaStreamTrack = track.mediaStreamTrack;
+        if (!mediaStreamTrack) {
+          console.error('No mediaStreamTrack in subscribed track');
+          return;
+        }
+        
+        const stream = new MediaStream([mediaStreamTrack]);
+        viewerStreamsRef.current.set(sharerId, stream);
+        subscribedRemoteScreenTracksRef.current.set(sharerId, { track, publication, participant });
+
+        // Attach to video element using track's attach method for better compatibility
+        ensureScreenTile(sharerId, (users.find(u => u.id === sharerId)?.name) || 'Screen');
+        
+        // Attach track to element using LiveKit's attach method
+        const attachToElement = async (element, retries = 0) => {
+          if (!element || !(element instanceof HTMLVideoElement)) return false;
+          
+          try {
+            // Wait for track to be ready with retries
+            if (!track.mediaStreamTrack) {
+              if (retries < 10) {
+                setTimeout(() => attachToElement(element, retries + 1), 100);
+                return false;
+              }
+              console.warn('Track mediaStreamTrack not available after retries');
+              return false;
+            }
+
+            // Wait for track to be live
+            if (track.mediaStreamTrack.readyState !== 'live') {
+              if (retries < 20) {
+                setTimeout(() => attachToElement(element, retries + 1), 100);
+                return false;
+              }
+              console.warn('Track not live after retries, attempting attach anyway');
+            }
+
+            // Use LiveKit's attach method for proper track attachment
+            track.attach(element);
+            
+            // Also set srcObject as fallback for better compatibility
+            if (element.srcObject !== stream) {
+              element.srcObject = stream;
+            }
+            
+            // Wait a bit for track to initialize, then play
+            await new Promise(resolve => setTimeout(resolve, 100));
+            await element.play();
+            
+            // Auto-open full-screen on first frame if not already
+            if (!fullScreenSharerId) {
+              setFullScreenSharerId(sharerId);
+            }
+            // Notify server I'm watching
+            try { socket.emit('viewer-started-watching', { sharerId }); } catch {}
+            return true;
+          } catch (e) {
+            console.error('Error attaching track to element:', e);
+            // Fallback to srcObject only
+            if (retries < 3) {
+              setTimeout(() => attachToElement(element, retries + 1), 200);
+              return false;
+            }
+            try {
+              element.srcObject = stream;
+              await element.play();
+              return true;
+            } catch (e2) {
+              console.error('Fallback attachment failed:', e2);
+              return false;
+            }
+          }
+        };
+
+        // Try to attach with retries
+        const tryAttach = async () => {
+          let retryCount = 0;
+          const maxRetries = 10;
+          while (retryCount < maxRetries) {
+            const videoEl = document.getElementById(`screen-video-${sharerId}`);
+            if (videoEl) {
+              const attached = await attachToElement(videoEl, 0);
+              if (attached) {
+                return true;
+              }
+            }
+            retryCount++;
+            await new Promise(resolve => setTimeout(resolve, 150));
+          }
+          return false;
+        };
+
+        // Try immediate attach (fire and forget async)
+        (async () => {
+          await tryAttach();
+        })();
+      }
+    });
+
+    // Handle track unsubscription
+    room.on('trackUnsubscribed', (track, publication, participant) => {
+      if (track.kind === 'video' && track.source === Track.Source.ScreenShare) {
+        const sharerId = participant.identity;
+        if (sharerId && sharerId !== socket.id) {
+          // Detach track from element
+          const videoEl = document.getElementById(`screen-video-${sharerId}`);
+          if (videoEl) {
+            try {
+              track.detach(videoEl);
+              videoEl.srcObject = null;
+            } catch {}
+          }
+          subscribedRemoteScreenTracksRef.current.delete(sharerId);
+          viewerStreamsRef.current.delete(sharerId);
+        }
+      }
+    });
+
+    // Handle new participant connecting
+    room.on('participantConnected', async (participant) => {
+      const sharerId = participant.identity;
+      if (!sharerId || sharerId === socket.id) return;
+
+      // Subscribe to any existing screen share tracks from this participant
+      for (const publication of participant.trackPublications.values()) {
+        if (publication.kind === 'video' && publication.source === Track.Source.ScreenShare && !publication.isSubscribed) {
+          try {
+            await publication.setSubscribed(true);
+          } catch (e) {
+            console.error('Error subscribing to participant track:', e);
+          }
+        }
+      }
+    });
+
+    // Handle participant leaving
+    room.on('participantDisconnected', (participant) => {
+      const sharerId = participant.identity;
+      if (sharerId && sharerId !== socket.id) {
+        // Detach all tracks from this participant
+        const trackSub = subscribedRemoteScreenTracksRef.current.get(sharerId);
+        if (trackSub && trackSub.track) {
+          const videoEl = document.getElementById(`screen-video-${sharerId}`);
+          if (videoEl) {
+            try {
+              trackSub.track.detach(videoEl);
+              videoEl.srcObject = null;
+            } catch {}
+          }
+        }
+        subscribedRemoteScreenTracksRef.current.delete(sharerId);
+        viewerStreamsRef.current.delete(sharerId);
+        updateScreenTile(sharerId, { ended: true });
+      }
+    });
+  }
+
   async function toggleScreenShare() {
     if (isSharingScreen) {
-      // Stop
+      // Stop screen sharing
       try {
-        localScreenStreamRef.current?.getTracks()?.forEach(t => t.stop());
-      } catch {}
-      localScreenStreamRef.current = null;
-      setIsSharingScreen(false);
-      try { socket?.emit('stop-screenshare'); } catch {}
-      // Close all viewer peer connections
-      for (const [, pc] of sharerPeerConnsRef.current) {
-        try { pc.close(); } catch {}
+        // Unpublish tracks from LiveKit room
+        const room = lkScreenShareRoomRef.current;
+        if (room && room.state === 'connected') {
+          for (const track of localScreenTracksRef.current) {
+            try {
+              await room.localParticipant.unpublishTrack(track);
+              track.stop();
+            } catch {}
+          }
+          // Don't disconnect the room here - keep it connected for viewing others' shares
+        } else {
+          // Fallback: stop tracks directly
+          for (const track of localScreenTracksRef.current) {
+            try { track.stop(); } catch {}
+          }
+        }
+        localScreenTracksRef.current = [];
+        localScreenStreamRef.current = null;
+        setIsSharingScreen(false);
+        try { socket?.emit('stop-screenshare'); } catch {}
+      } catch (e) {
+        console.error('Error stopping screen share:', e);
+        setIsSharingScreen(false);
       }
-      sharerPeerConnsRef.current.clear();
       return;
     }
 
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
+      // Ensure we have a LiveKit room connection (should be handled by useEffect, but ensure it exists)
+      let room = lkScreenShareRoomRef.current;
+      if (!room || room.state !== 'connected') {
+        // Wait a bit for room to connect, or connect now
+        const token = localStorage.getItem('token');
+        if (!token) {
+          addToast('Authentication required.', 'error');
+          return;
+        }
+
+        const roomName = `screenshare-${currentRoom}`;
+        const tokenRes = await fetch('/api/livekit/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            room: roomName,
+            identity: socket?.id || user?.id || 'user',
+            name: user?.name || account?.name || 'User'
+          })
+        });
+
+        if (!tokenRes.ok) {
+          throw new Error('Failed to get LiveKit token');
+        }
+
+        const { token: lkToken, url: lkUrl } = await tokenRes.json();
+        room = new LiveKitRoom();
+        
+        // Setup event handlers BEFORE connecting
+        setupLiveKitRoomHandlers(room);
+        
+        await room.connect(lkUrl, lkToken);
+        lkScreenShareRoomRef.current = room;
+      } else {
+        // Room already exists, ensure handlers are set up
+        setupLiveKitRoomHandlers(room);
+      }
+
+      // Create local screen tracks using LiveKit
+      const tracks = await createLocalScreenTracks({
         video: {
           displaySurface: 'monitor',
-          frameRate: { ideal: 30, max: 60 },
+          frameRate: 30,
           width: { ideal: 1920 },
           height: { ideal: 1080 }
         },
         audio: false
       });
-      localScreenStreamRef.current = stream;
-      setIsSharingScreen(true);
-      // Auto stop if user ends via browser UX
-      const [track] = stream.getVideoTracks();
-      if (track) {
+
+      localScreenTracksRef.current = tracks;
+
+      // Create MediaStream from tracks for local preview
+      const mediaStreamTracks = tracks.map(t => t.mediaStreamTrack).filter(Boolean);
+      if (mediaStreamTracks.length > 0) {
+        localScreenStreamRef.current = new MediaStream(mediaStreamTracks);
+      }
+
+      // Publish tracks to room
+      for (const track of tracks) {
         try {
-          const senderParams = track.getSettings?.() || {};
-          // Optional: tweak encoding on actual sender per peer later via setParameters
-        } catch {}
-        track.onended = () => {
+          await room.localParticipant.publishTrack(track, { source: Track.Source.ScreenShare });
+        } catch (e) {
+          console.error('Error publishing track:', e);
+        }
+      }
+
+      // Handle track ended (user stops via browser)
+      for (const track of tracks) {
+        track.on('ended', async () => {
           setIsSharingScreen(false);
           try { socket?.emit('stop-screenshare'); } catch {}
-          for (const [, pc] of sharerPeerConnsRef.current) {
-            try { pc.close(); } catch {}
+          // Unpublish tracks
+          const room = lkScreenShareRoomRef.current;
+          if (room && room.state === 'connected') {
+            try {
+              for (const t of localScreenTracksRef.current) {
+                await room.localParticipant.unpublishTrack(t);
+                t.stop();
+              }
+            } catch {}
           }
-          sharerPeerConnsRef.current.clear();
+          localScreenTracksRef.current = [];
           localScreenStreamRef.current = null;
-        };
+        });
       }
+
+      setIsSharingScreen(true);
       socket?.emit('start-screenshare');
     } catch (e) {
+      console.error('Screen share error:', e);
       if (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) {
         addToast('Screen capture permission denied. You can try again.', 'error');
       } else {
         addToast('Failed to start screen share.', 'error');
       }
       setIsSharingScreen(false);
+      // Cleanup on error
+      for (const track of localScreenTracksRef.current) {
+        try { track.stop(); } catch {}
+      }
+      localScreenTracksRef.current = [];
       localScreenStreamRef.current = null;
     }
   }
@@ -553,7 +826,7 @@ function App() {
     };
   }, [socket]);
 
-  // Socket: screen share signaling
+  // Socket: screen share presence signaling (who is sharing - LiveKit handles actual streaming)
   useEffect(() => {
     if (!socket) return;
 
@@ -565,157 +838,136 @@ function App() {
     };
     const onStopped = ({ sharerId }) => {
       setActiveSharerIds(prev => prev.filter(id => id !== sharerId));
-      // As viewer: close connection and show placeholder
-      const pc = viewerPeerConnsRef.current.get(sharerId);
-      if (pc) {
-        try { pc.close(); } catch {}
-        viewerPeerConnsRef.current.delete(sharerId);
+      // As viewer: remove LiveKit subscription
+      const trackSub = subscribedRemoteScreenTracksRef.current.get(sharerId);
+      if (trackSub) {
+        try {
+          if (trackSub.publication) {
+            trackSub.publication.setSubscribed(false);
+          }
+          if (trackSub.track) {
+            trackSub.track.detach();
+          }
+        } catch {}
+        subscribedRemoteScreenTracksRef.current.delete(sharerId);
       }
+      viewerStreamsRef.current.delete(sharerId);
       updateScreenTile(sharerId, { ended: true });
     };
 
-    const onSubscribe = async ({ from }) => {
-      // I am sharer, viewer requests subscription
-      if (!isSharingScreen || !localScreenStreamRef.current) return;
-      if (sharerPeerConnsRef.current.has(from)) {
-        try { sharerPeerConnsRef.current.get(from).close(); } catch {}
-        sharerPeerConnsRef.current.delete(from);
-      }
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      sharerPeerConnsRef.current.set(from, pc);
-      for (const track of localScreenStreamRef.current.getTracks()) {
-        try { track.contentHint = 'detail'; } catch {}
-        pc.addTrack(track, localScreenStreamRef.current);
-      }
-      try {
-        const senders = pc.getSenders();
-        for (const sender of senders) {
-          if (sender.track && sender.track.kind === 'video') {
-            const p = sender.getParameters();
-            p.encodings = [{ maxBitrate: 1_500_000, scaleResolutionDownBy: 1 }];
-            try { await sender.setParameters(p); } catch {}
-          }
-        }
-      } catch {}
-      pc.onicecandidate = (ev) => {
-        if (ev.candidate) socket.emit('webrtc-ice-candidate', { to: from, candidate: ev.candidate });
-      };
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
-          try { pc.close(); } catch {}
-          sharerPeerConnsRef.current.delete(from);
-        }
-      };
-      try {
-        const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
-        await pc.setLocalDescription(offer);
-        socket.emit('webrtc-offer', { to: from, sdp: pc.localDescription });
-      } catch (e) {
-        try { pc.close(); } catch {}
-        sharerPeerConnsRef.current.delete(from);
-      }
-    };
-
-    const onUnsubscribe = ({ from }) => {
-      const pc = sharerPeerConnsRef.current.get(from);
-      if (pc) {
-        try { pc.close(); } catch {}
-        sharerPeerConnsRef.current.delete(from);
-      }
-    };
-
-    const onOffer = async ({ from, sdp }) => {
-      // I am viewer receiving offer from sharer
-      let pc = viewerPeerConnsRef.current.get(from);
-      if (pc) {
-        try { pc.close(); } catch {}
-        viewerPeerConnsRef.current.delete(from);
-      }
-      pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      viewerPeerConnsRef.current.set(from, pc);
-      pc.onicecandidate = (ev) => {
-        if (ev.candidate) socket.emit('webrtc-ice-candidate', { to: from, candidate: ev.candidate });
-      };
-      pc.ontrack = (ev) => {
-        const [stream] = ev.streams;
-        // store stream for full-screen reuse
-        viewerStreamsRef.current.set(from, stream);
-        ensureScreenTile(from, (users.find(u => u.id === from)?.name) || 'Screen');
-        const tryAttach = () => {
-          const videoEl = document.getElementById(`screen-video-${from}`);
-          if (videoEl && videoEl instanceof HTMLVideoElement) {
-            try { videoEl.srcObject = stream; } catch {}
-            // auto-open full-screen on first frame if not already
-            if (!fullScreenSharerId) {
-              setFullScreenSharerId(from);
-            }
-            // notify server I'm watching
-            try { socket.emit('viewer-started-watching', { sharerId: from }); } catch {}
-            return true;
-          }
-          return false;
-        };
-        if (!tryAttach()) {
-          setTimeout(() => { tryAttach(); }, 50);
-        }
-      };
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-          try { pc.close(); } catch {}
-          viewerPeerConnsRef.current.delete(from);
-        }
-      };
-      try {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit('webrtc-answer', { to: from, sdp: pc.localDescription });
-      } catch (e) {
-        try { pc.close(); } catch {}
-        viewerPeerConnsRef.current.delete(from);
-      }
-    };
-
-    const onAnswer = async ({ from, sdp }) => {
-      // I am sharer receiving viewer's answer
-      const pc = sharerPeerConnsRef.current.get(from);
-      if (!pc) return;
-      try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch {}
-    };
-
-    const onIce = async ({ from, candidate }) => {
-      let pc = sharerPeerConnsRef.current.get(from);
-      if (!pc) pc = viewerPeerConnsRef.current.get(from);
-      if (!pc) return;
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+    const onWatchers = ({ sharerId, watchers }) => {
+      setWatchersBySharerId(prev => ({ ...prev, [sharerId]: Array.isArray(watchers) ? watchers : [] }));
     };
 
     socket.on('screenshare-active', onActive);
     socket.on('screenshare-started', onStarted);
     socket.on('screenshare-stopped', onStopped);
-    socket.on('screenshare-subscribe', onSubscribe);
-    socket.on('screenshare-unsubscribe', onUnsubscribe);
-    socket.on('webrtc-offer', onOffer);
-    socket.on('webrtc-answer', onAnswer);
-    const onWatchers = ({ sharerId, watchers }) => {
-      setWatchersBySharerId(prev => ({ ...prev, [sharerId]: Array.isArray(watchers) ? watchers : [] }));
-    };
-
-    socket.on('webrtc-ice-candidate', onIce);
     socket.on('screenshare-watchers', onWatchers);
 
     return () => {
       socket.off('screenshare-active', onActive);
       socket.off('screenshare-started', onStarted);
       socket.off('screenshare-stopped', onStopped);
-      socket.off('screenshare-subscribe', onSubscribe);
-      socket.off('screenshare-unsubscribe', onUnsubscribe);
-      socket.off('webrtc-offer', onOffer);
-      socket.off('webrtc-answer', onAnswer);
-      socket.off('webrtc-ice-candidate', onIce);
       socket.off('screenshare-watchers', onWatchers);
     };
-  }, [socket, users, isSharingScreen]);
+  }, [socket]);
+
+  // LiveKit: Connect to screen share room and handle remote track subscriptions
+  useEffect(() => {
+    if (!socket || !user || !currentRoom) return;
+
+    let room = lkScreenShareRoomRef.current;
+    let isConnecting = false;
+
+    async function connectToScreenShareRoom() {
+      if (room && room.state === 'connected') return; // Already connected
+      if (isConnecting) return;
+      isConnecting = true;
+
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        const roomName = `screenshare-${currentRoom}`;
+        
+        // Get LiveKit access token
+        const tokenRes = await fetch('/api/livekit/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            room: roomName,
+            identity: socket.id || user.id || 'user',
+            name: user.name || account?.name || 'User'
+          })
+        });
+
+        if (!tokenRes.ok) {
+          console.error('Failed to get LiveKit token for screen share room');
+          isConnecting = false;
+          return;
+        }
+
+        const { token: lkToken, url: lkUrl } = await tokenRes.json();
+
+        // Disconnect existing room if any
+        if (room) {
+          try {
+            await room.disconnect();
+          } catch {}
+        }
+
+        // Create and connect to LiveKit room
+        const newRoom = new LiveKitRoom();
+        
+        // Setup event handlers BEFORE connecting
+        setupLiveKitRoomHandlers(newRoom);
+        
+        await newRoom.connect(lkUrl, lkToken);
+        lkScreenShareRoomRef.current = newRoom;
+        isConnecting = false;
+
+        // Subscribe to existing screen share tracks after connection
+        // Wait a bit for connection to fully establish
+        setTimeout(async () => {
+          if (!newRoom || newRoom.state !== 'connected') return;
+          
+          for (const participant of newRoom.remoteParticipants.values()) {
+            for (const publication of participant.trackPublications.values()) {
+              if (publication.kind === 'video' && publication.source === Track.Source.ScreenShare) {
+                const sharerId = participant.identity;
+                if (sharerId && sharerId !== socket.id && !publication.isSubscribed) {
+                  try {
+                    await publication.setSubscribed(true);
+                  } catch (e) {
+                    console.error('Error subscribing to existing track:', e);
+                  }
+                }
+              }
+            }
+          }
+        }, 500);
+      } catch (e) {
+        console.error('Error connecting to LiveKit screen share room:', e);
+        isConnecting = false;
+      }
+    }
+
+    connectToScreenShareRoom();
+
+    // Also ensure handlers are set up if room already exists
+    if (room && room.state === 'connected') {
+      setupLiveKitRoomHandlers(room);
+    }
+
+    // Cleanup on unmount or room change
+    return () => {
+      // Don't disconnect here - keep room connected for viewing others' shares
+      // Only cleanup handlers if needed
+    };
+  }, [socket, user, currentRoom, isSharingScreen, users, account]);
 
   // Socket: mic signaling (mirror of screen share but audio-only)
   useEffect(() => {
@@ -993,25 +1245,59 @@ function App() {
     };
   }, [socket, users, isCamOn]);
 
-  // Proximity-based auto subscribe/unsubscribe for screen share (with dedupe)
+  // Proximity-based auto subscribe/unsubscribe for screen share (LiveKit handles subscriptions automatically)
   useEffect(() => {
     if (!socket || !user) return;
-    const subscribedSharers = new Set(viewerPeerConnsRef.current.keys());
-    // Subscribe to newly eligible sharers
+    const room = lkScreenShareRoomRef.current;
+    if (!room || room.state !== 'connected') return;
+
+    const subscribedSharers = new Set(subscribedRemoteScreenTracksRef.current.keys());
+    
+    // Subscribe to newly eligible sharers via LiveKit
     for (const sharerId of eligibleSharerIds) {
       if (!subscribedSharers.has(sharerId)) {
-        socket.emit('screenshare-subscribe', { sharerId });
-        // Prepare tile immediately for smooth appear
-        ensureScreenTile(sharerId, (users.find(u => u.id === sharerId)?.name) || 'Screen');
+        // Find participant by identity (socket ID)
+        const participant = Array.from(room.remoteParticipants.values()).find(
+          p => p.identity === sharerId
+        );
+        if (participant) {
+          // Find screen share track publication
+          for (const publication of participant.trackPublications.values()) {
+            if (publication.kind === 'video' && publication.source === Track.Source.ScreenShare) {
+              // Subscribe if not already subscribed
+              if (!publication.isSubscribed) {
+                publication.setSubscribed(true).catch((e) => {
+                  console.error('Error subscribing to proximity sharer:', e);
+                });
+              }
+              // Prepare tile immediately for smooth appear
+              ensureScreenTile(sharerId, (users.find(u => u.id === sharerId)?.name) || 'Screen');
+              break;
+            }
+          }
+        }
       }
     }
+    
     // Unsubscribe from those no longer eligible
     for (const sharerId of subscribedSharers) {
       if (!eligibleSharerIds.includes(sharerId)) {
-        socket.emit('screenshare-unsubscribe', { sharerId });
-        const pc = viewerPeerConnsRef.current.get(sharerId);
-        if (pc) { try { pc.close(); } catch {} }
-        viewerPeerConnsRef.current.delete(sharerId);
+        const trackSub = subscribedRemoteScreenTracksRef.current.get(sharerId);
+        if (trackSub && trackSub.publication) {
+          trackSub.publication.setSubscribed(false).catch(() => {});
+        }
+        // Detach track from video element
+        if (trackSub && trackSub.track) {
+          const videoEl = document.getElementById(`screen-video-${sharerId}`);
+          if (videoEl) {
+            try {
+              trackSub.track.detach(videoEl);
+              videoEl.srcObject = null;
+            } catch {}
+          }
+        }
+        subscribedRemoteScreenTracksRef.current.delete(sharerId);
+        viewerStreamsRef.current.delete(sharerId);
         removeScreenTile(sharerId);
         try { socket.emit('viewer-stopped-watching', { sharerId }); } catch {}
         if (fullScreenSharerId === sharerId) {
@@ -1512,7 +1798,32 @@ function App() {
                         </div>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button title="Maximize" onClick={(e) => { e.stopPropagation(); const useVideo = isMinimizedVideoHere || (u.id === user?.id && isCamOn && videoMinimizedIds.includes(user.id)); if (useVideo) { setFullScreenVideoId(u.id); removeMinimizedVideo(u.id); } else { setFullScreenSharerId(u.id); removeMinimizedSharer(u.id); } }} style={{ border: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', borderRadius: 6, height: 22, padding: '0 6px', cursor: 'pointer' }}>⤢</button>
-                          <button title="Close" onClick={(e) => { e.stopPropagation(); const useVideo = isMinimizedVideoHere || (u.id === user?.id && isCamOn && videoMinimizedIds.includes(user.id)); if (useVideo) { try { socket?.emit('video-unsubscribe', { broadcasterId: u.id }); } catch {} const pc = videoViewerPCsRef.current.get(u.id); if (pc) { try { pc.close(); } catch {} } videoViewerPCsRef.current.delete(u.id); removeVideoTile(u.id); removeMinimizedVideo(u.id); } else { try { socket?.emit('screenshare-unsubscribe', { sharerId: u.id }); } catch {} const pc = viewerPeerConnsRef.current.get(u.id); if (pc) { try { pc.close(); } catch {} } viewerPeerConnsRef.current.delete(u.id); removeScreenTile(u.id); try { socket?.emit('viewer-stopped-watching', { sharerId: u.id }); } catch {} removeMinimizedSharer(u.id); } }} style={{ border: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', borderRadius: 6, height: 22, padding: '0 6px', cursor: 'pointer' }}>×</button>
+                          <button title="Close" onClick={(e) => { e.stopPropagation(); const useVideo = isMinimizedVideoHere || (u.id === user?.id && isCamOn && videoMinimizedIds.includes(user.id)); if (useVideo) { try { socket?.emit('video-unsubscribe', { broadcasterId: u.id }); } catch {} const pc = videoViewerPCsRef.current.get(u.id); if (pc) { try { pc.close(); } catch {} } videoViewerPCsRef.current.delete(u.id); removeVideoTile(u.id); removeMinimizedVideo(u.id); } else { 
+                            // As viewer: unsubscribe from LiveKit screen share
+                            const trackSub = subscribedRemoteScreenTracksRef.current.get(u.id);
+                            if (trackSub && trackSub.publication) {
+                              try {
+                                trackSub.publication.setSubscribed(false);
+                              } catch {}
+                            }
+                            if (trackSub && trackSub.track) {
+                              const videoEl = document.getElementById(`screen-video-${u.id}`);
+                              if (videoEl) {
+                                try {
+                                  trackSub.track.detach(videoEl);
+                                  videoEl.srcObject = null;
+                                } catch {}
+                              }
+                            }
+                            subscribedRemoteScreenTracksRef.current.delete(u.id);
+                            viewerStreamsRef.current.delete(u.id);
+                            removeScreenTile(u.id);
+                            try { socket?.emit('viewer-stopped-watching', { sharerId: u.id }); } catch {}
+                            removeMinimizedSharer(u.id);
+                            if (fullScreenSharerId === u.id) {
+                              setFullScreenSharerId(null);
+                            }
+                          } }} style={{ border: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', borderRadius: 6, height: 22, padding: '0 6px', cursor: 'pointer' }}>×</button>
                         </div>
                       </div>
                     </div>
@@ -1773,20 +2084,41 @@ function App() {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button
                     title="Maximize"
-                    onClick={() => { setFullScreenSharerId(sharerId); setMinimizedSharerIds([]); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeMinimizedSharer(sharerId);
+                      setFullScreenSharerId(sharerId);
+                    }}
                     style={{ border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', borderRadius: 6, height: 24, padding: '0 8px', cursor: 'pointer' }}
                   >⤢</button>
                   <button
                     title="Close"
-                    onClick={() => {
-                      // As viewer: unsubscribe and close
-                      try { socket?.emit('screenshare-unsubscribe', { sharerId }); } catch {}
-                      const pc = viewerPeerConnsRef.current.get(sharerId);
-                      if (pc) { try { pc.close(); } catch {} }
-                      viewerPeerConnsRef.current.delete(sharerId);
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // As viewer: unsubscribe from LiveKit and close
+                      const trackSub = subscribedRemoteScreenTracksRef.current.get(sharerId);
+                      if (trackSub && trackSub.publication) {
+                        try {
+                          trackSub.publication.setSubscribed(false);
+                        } catch {}
+                      }
+                      if (trackSub && trackSub.track) {
+                        const videoEl = document.getElementById(`screen-video-${sharerId}`);
+                        if (videoEl) {
+                          try {
+                            trackSub.track.detach(videoEl);
+                            videoEl.srcObject = null;
+                          } catch {}
+                        }
+                      }
+                      subscribedRemoteScreenTracksRef.current.delete(sharerId);
+                      viewerStreamsRef.current.delete(sharerId);
                       removeScreenTile(sharerId);
                       try { socket?.emit('viewer-stopped-watching', { sharerId }); } catch {}
                       removeMinimizedSharer(sharerId);
+                      if (fullScreenSharerId === sharerId) {
+                        setFullScreenSharerId(null);
+                      }
                     }}
                     style={{ border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', borderRadius: 6, height: 24, padding: '0 8px', cursor: 'pointer' }}
                   >×</button>
@@ -2022,7 +2354,10 @@ function App() {
                 const u = users.find(x => x.id === id);
                 const isActive = id === fullScreenSharerId;
                 return (
-                  <button key={id} className={`ss-switcher-item ${isActive ? 'active' : ''}`} title={u?.name || 'Screen'} onClick={() => setFullScreenSharerId(id)}>
+                  <button key={id} className={`ss-switcher-item ${isActive ? 'active' : ''}`} title={u?.name || 'Screen'} onClick={() => {
+                    removeMinimizedSharer(id);
+                    setFullScreenSharerId(id);
+                  }}>
                     <span className="ss-switcher-emoji">{u?.avatar || '🖥️'}</span>
                     <span className="ss-switcher-name">{u?.name || 'Screen'}</span>
                   </button>
@@ -2037,8 +2372,11 @@ function App() {
               className="ss-btn"
               onClick={() => {
                 const sid = fullScreenSharerId;
-                setFullScreenSharerId(null);
-                if (sid) { dockScreenTileToAnchor(sid); addMinimizedSharer(sid); }
+                if (sid) {
+                  dockScreenTileToAnchor(sid);
+                  addMinimizedSharer(sid);
+                  setFullScreenSharerId(null);
+                }
               }}
               title="Minimize"
             >⤡</button>

@@ -535,48 +535,8 @@ io.on('connection', (socket) => {
     io.to(info.room).emit('screenshare-stopped', { sharerId: socket.id });
   });
 
-  // Viewer requests to subscribe to sharer's stream
-  socket.on('screenshare-subscribe', ({ sharerId }) => {
-    if (!sharerId) return;
-    const sharer = connectedUsers.get(sharerId);
-    const viewer = connectedUsers.get(socket.id);
-    if (!sharer || !viewer) return;
-    // Only relay if in same office room and within proximity radius
-    if (sharer.room !== viewer.room) return;
-    const dx = (sharer.position?.x || 0) - (viewer.position?.x || 0);
-    const dy = (sharer.position?.y || 0) - (viewer.position?.y || 0);
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const RADIUS = 3;
-    if (distance > RADIUS) return;
-    io.to(sharerId).emit('screenshare-subscribe', { from: socket.id });
-  });
-
-  // Viewer unsubscribes (moved away)
-  socket.on('screenshare-unsubscribe', ({ sharerId }) => {
-    if (!sharerId) return;
-    io.to(sharerId).emit('screenshare-unsubscribe', { from: socket.id });
-    const set = watchersBySharer.get(sharerId);
-    if (set && set.has(socket.id)) {
-      set.delete(socket.id);
-      emitWatchers(io, sharerId);
-    }
-  });
-
-  // Generic WebRTC signaling relay
-  socket.on('webrtc-offer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('webrtc-offer', { from: socket.id, sdp });
-  });
-
-  socket.on('webrtc-answer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('webrtc-answer', { from: socket.id, sdp });
-  });
-
-  socket.on('webrtc-ice-candidate', ({ to, candidate }) => {
-    if (!to || !candidate) return;
-    io.to(to).emit('webrtc-ice-candidate', { from: socket.id, candidate });
-  });
+  // Note: Screen share WebRTC signaling removed - now handled entirely by LiveKit
+  // Viewer watcher tracking (for UI display) - kept existing handler below for proximity checks
 
   // --- Proximity voice (mic) signaling (WebRTC over Socket.IO) ---
   socket.on('start-audio', () => {
