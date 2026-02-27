@@ -1,188 +1,150 @@
 # Vorko
 
-A virtual office application featuring movable characters, real-time communication, and multiple office environments.
-
-## Features
-
-- 🏢 **Multiple Office Rooms**: Main Office, Meeting Room, and Break Room
-- 👥 **Movable Characters**: Use WASD or arrow keys to navigate
-- 💬 **Real-time Chat**: Communicate with other users in the same room
-- 🎨 **Customizable Avatars**: Choose from various emoji avatars
-- 🌐 **Real-time Updates**: See other users move and chat in real-time
-- 📱 **Responsive Design**: Modern UI with smooth animations
-
-## Tech Stack
-
-- **Frontend**: React 18, Vite
-- **Backend**: Node.js, Express
-- **Real-time**: Socket.IO
-- **Styling**: CSS3 with modern design principles
-
-## Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <your-repo-url>
-   cd work-together
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Start the backend server**
-   ```bash
-   npm start
-   ```
-   This will start the server on port 5000
-
-4. **Start the frontend development server**
-   ```bash
-   npm run dev
-   ```
-   This will start the frontend on port 3000
-
-## Usage
-
-### Getting Started
-
-1. Open your browser and navigate to `http://localhost:3000`
-2. Enter your name and choose an avatar
-3. Click "Enter Office" to join Vorko
-
-### Controls
-
-- **Movement**: Use WASD keys or Arrow keys to move your character
-- **Room Switching**: Use the room selector in the left control panel
-- **Chat**: Type messages in the chat panel on the right
-- **Toggle Controls**: Click the gear button (⚙) to show/hide the control panel
-
-### Office Layouts
-
-- **Main Office**: Open workspace with individual desks and chairs
-- **Meeting Room**: Conference table setup for team meetings
-- **Break Room**: Relaxation area with coffee machines and seating
-
-## Project Structure
-
-```
-work-together/
-├── src/
-│   ├── components/
-│   │   ├── OfficeGrid.jsx      # Office layout rendering
-│   │   ├── Character.jsx       # Movable character component
-│   │   ├── Controls.jsx        # User input controls
-│   │   ├── ChatPanel.jsx       # Real-time chat interface
-│   │   └── RoomInfo.jsx        # Room information display
-│   ├── data/
-│   │   └── officeData.js       # Office layouts and objects
-│   ├── App.jsx                 # Main application component
-│   ├── main.jsx                # React entry point
-│   └── index.css               # Global styles
-├── server.js                   # Express + Socket.IO server
-├── package.json                # Dependencies and scripts
-└── vite.config.js             # Vite configuration
-```
-
-## Development
-
-### Adding New Rooms
-
-1. Add room layout to `src/data/officeData.js`
-2. Define the grid layout and office objects
-3. Update the room selector in `Controls.jsx`
-
-### Customizing Characters
-
-- Modify avatar options in `Controls.jsx`
-- Update character colors in `Character.jsx`
-- Add new character features as needed
-
-### Styling
-
-- Main styles are in `src/index.css`
-- Component-specific styles can be added inline or in separate CSS files
-- Uses CSS Grid for the office layout
-
-## Deployment
-
-### Build for Production
-
-```bash
-npm run build
-```
-
-### Deploy Backend
-
-1. Set environment variables for production
-2. Deploy `server.js` to your hosting platform
-3. Update the Socket.IO connection URL in the frontend
-
-### Deploy Frontend
-
-1. Build the project: `npm run build`
-2. Deploy the `dist` folder to your hosting platform
-3. Ensure the backend URL is correctly configured
-
-## Run with Docker (simple)
-
-This is the easiest way to run everything (API + frontend) together.
-
-- **Prerequisite**: Install Docker Desktop and make sure it is running.
-
-- **Start the app**
-  ```bash
-  docker compose up -d --build
-  ```
-  Then open `http://localhost:5000` in your browser.
-
-- **Stop the app**
-  ```bash
-  docker compose down
-  ```
-
-- **See logs**
-  ```bash
-  docker compose logs -f
-  ```
-
-- **Environment variables**
-  You can set these in your shell or in a `.env` file next to `docker-compose.yml` (Docker will pick them up automatically):
-  - `JWT_SECRET` (required): A long random string.
-  - `LIVEKIT_URL` (optional): e.g. `wss://your.livekit.cloud`.
-  - `LIVEKIT_API_KEY` (optional)
-  - `LIVEKIT_API_SECRET` (optional)
-
-- **Data is persisted**
-  Chat and user data are stored in the `data/` folder on your computer (mapped into the container). You won’t lose data when you stop/start the container.
-
-- **Rebuild after code changes**
-  ```bash
-  docker compose up -d --build
-  ```
-
-- **Troubleshooting**
-  - Make sure Docker Desktop is running.
-  - If port 5000 is busy, stop whatever is using it or change the published port in `docker-compose.yml` (left side of `5000:5000`).
-  - If you see a warning about `version` in `docker-compose.yml`, you can ignore it or remove the first line that starts with `version:`.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## License
-
-MIT License - feel free to use this project for personal or commercial purposes.
-
-## Support
-
-For issues or questions, please open an issue in the repository or contact the development team.
+A **virtual office** with movable characters and real-time collaboration: room chat, DMs, proximity-based voice, video, and screen sharing.
 
 ---
 
-**Enjoy Vorko! 🏢✨**
+## What it does
+
+- **2D office map** — Move your character on a grid; see others in the same room.
+- **Room chat** — Messages visible to everyone in the current room.
+- **Direct messages (DMs)** — Private chat with any user.
+- **Proximity voice** — Mic on/off; only nearby users (within 3 tiles) hear you. WebRTC P2P.
+- **Proximity video** — Camera on/off; only nearby users see your video. WebRTC P2P.
+- **Screen share** — Share your screen; only nearby users can subscribe. WebRTC P2P.
+- **Presence** — Available / Busy / Do not disturb; optional wave notifications.
+- **User directory** — List registered users; open profile or start a DM.
+
+Media (audio, video, screen) uses **WebRTC** with **Socket.IO** for signaling only. LiveKit is installed but not used for these flows.
+
+---
+
+## Tech stack
+
+| Layer        | Tech |
+|-------------|------|
+| Frontend    | React 18, Vite |
+| Backend    | Node.js, Express |
+| Realtime   | Socket.IO |
+| Media      | WebRTC (getUserMedia, getDisplayMedia, RTCPeerConnection) |
+| Auth       | JWT (login/register), JSON file store for users/messages |
+
+---
+
+## Prerequisites
+
+- **Node.js** (v18+ recommended)
+- **npm** (or yarn/pnpm)
+
+---
+
+## Quick start
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Run the app
+
+**Option A — Development (frontend + backend)**
+
+- Terminal 1 — backend (API + Socket.IO):
+
+  ```bash
+  npm run start
+  ```
+
+  Server runs at **http://localhost:5000**.
+
+- Terminal 2 — frontend (Vite):
+
+  ```bash
+  npm run dev
+  ```
+
+  App runs at **http://localhost:3000**. Vite proxies `/api` and `/socket.io` to port 5000.
+
+**Option B — Production-style (single server)**
+
+```bash
+npm run build
+npm run start
+```
+
+Then open **http://localhost:5000**. The Express server serves the built app from `dist/`.
+
+### 3. Use the app
+
+1. Open the app in your browser.
+2. **Register** or **log in** (email + password).
+3. Move with **arrow keys** or **WASD** (or click to walk).
+4. Use the bottom bar: **mic**, **camera**, **screen share**, **chat**, **hang up** (turns off mic/camera/screen).
+5. Get close to other users (within 3 tiles) to hear/see them or watch their screen share.
+
+---
+
+## Scripts
+
+| Command           | Description |
+|------------------|-------------|
+| `npm run dev`    | Start Vite dev server (port 3000, proxies to 5000) |
+| `npm run build`  | Build frontend to `dist/` |
+| `npm run preview`| Preview production build (Vite) |
+| `npm run start`  | Start Express server (port 5000, serves API + Socket.IO + optional static) |
+
+---
+
+## Project layout
+
+```
+vorko/
+├── public/           # Static assets
+├── src/
+│   ├── main.jsx     # Entry point
+│   ├── App.jsx      # Main app: auth, movement, Socket.IO, WebRTC (mic/video/screen), UI
+│   ├── index.css    # Global styles
+│   ├── data/
+│   │   └── officeData.js   # Office layout / rooms
+│   └── components/
+│       ├── Auth.jsx
+│       ├── Character.jsx
+│       ├── ChatPanel.jsx
+│       ├── Controls.jsx
+│       ├── OfficeGrid.jsx
+│       └── RoomInfo.jsx
+├── data/            # Runtime JSON store (users, room messages, DMs) — created by server
+├── server.js        # Express + Socket.IO + WebRTC signaling + auth + LiveKit token API
+├── vite.config.js
+└── package.json
+```
+
+---
+
+## Environment (optional)
+
+You can override defaults with env vars:
+
+| Variable              | Purpose |
+|-----------------------|---------|
+| `PORT`                | Server port (default `5000`) |
+| `JWT_SECRET`          | Secret for JWT auth (default dev value; change in production) |
+| `LIVEKIT_URL`         | LiveKit URL (used only for `/api/livekit/token`) |
+| `LIVEKIT_API_KEY`     | LiveKit API key |
+| `LIVEKIT_API_SECRET`  | LiveKit API secret |
+
+---
+
+## How media works (high level)
+
+- **Signaling**: Socket.IO (start/stop, subscribe/unsubscribe, SDP offer/answer, ICE candidates).
+- **Media**: WebRTC peer-to-peer (one `RTCPeerConnection` per viewer/listener).
+- **Proximity**: Server only allows subscribe when both users are in the **same room** and within **3 tiles** distance.
+- **ICE**: Client uses `stun:stun.l.google.com:19302`. No TURN in default setup; add TURN for strict NATs if needed.
+
+---
+
+## License
+
+MIT.
