@@ -7,6 +7,7 @@ import Character from './components/Character';
 import Controls from './components/Controls';
 import ChatPanel from './components/ChatPanel';
 import RoomInfo from './components/RoomInfo';
+import Avatar from './components/Avatar';
 import { officeLayout, officeObjects } from './data/officeData';
 
 function App() {
@@ -49,6 +50,8 @@ function App() {
   const [appNotifs, setAppNotifs] = useState([]); // [{id, type: 'dm'|'wave', fromUserId, fromSocketId, fromName, fromAvatar, text, timestamp, read}]
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const notifMenuRef = useRef(null);
+  const avatarUploadRef = useRef(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const notifUnread = useMemo(() => appNotifs.filter(n => !n.read).length, [appNotifs]);
   const [profileModalUserId, setProfileModalUserId] = useState(null);
   // LiveKit audio (unused for proximity mic)
@@ -537,12 +540,17 @@ function App() {
     const onMoved = (userData) => setUsers(prev => prev.map(u => u.id === userData.id ? { ...u, position: userData.position, room: userData.room, presence: userData.presence || u.presence } : u));
     const onPresenceChanged = ({ id, presence }) => setUsers(prev => prev.map(u => u.id === id ? { ...u, presence: presence || 'available' } : u));
     const onRoomUsers = (roomUsers) => setUsers(roomUsers.filter(u => u.id !== socket.id));
+    const onAvatarUpdated = ({ id, avatar }) => {
+      setUsers(prev => prev.map(u => u.id === id ? { ...u, avatar } : u));
+      if (id === socket.id) setUser(prev => prev ? { ...prev, avatar } : null);
+    };
 
     socket.on('user-joined', onJoined);
     socket.on('user-left', onLeft);
     socket.on('user-moved', onMoved);
     socket.on('room-users', onRoomUsers);
     socket.on('presence-changed', onPresenceChanged);
+    socket.on('user-avatar-updated', onAvatarUpdated);
 
     return () => {
       socket.off('user-joined', onJoined);
@@ -550,6 +558,7 @@ function App() {
       socket.off('user-moved', onMoved);
       socket.off('room-users', onRoomUsers);
       socket.off('presence-changed', onPresenceChanged);
+      socket.off('user-avatar-updated', onAvatarUpdated);
     };
   }, [socket]);
 
@@ -1195,19 +1204,20 @@ function App() {
 
   const handleJoinOffice = (userData) => {
     if (socket) {
-      const chosenAvatar = userData.avatar || account?.avatar || localStorage.getItem('user_avatar') || '👨';
+      const chosenAvatar = (userData.avatar || account?.avatar || localStorage.getItem('user_avatar') || '').trim();
+      const avatarToUse = (chosenAvatar && (chosenAvatar.startsWith('http') || chosenAvatar.startsWith('/') || chosenAvatar.startsWith('data:'))) ? chosenAvatar : '';
       const displayName = userData.name || account?.name || localStorage.getItem('user_name') || 'Guest';
       const user = {
         ...userData,
         name: displayName,
-        avatar: chosenAvatar,
+        avatar: avatarToUse,
         id: socket.id,
         position: { x: 15, y: 12 }, // Adjusted for 30x25 grid
         room: currentRoom,
         presence
       };
-      // persist avatar for future sessions
-      localStorage.setItem('user_avatar', chosenAvatar);
+      if (avatarToUse) localStorage.setItem('user_avatar', avatarToUse);
+      else localStorage.removeItem('user_avatar');
       setUser(user);
       socket.emit('join-office', user);
     }
@@ -1320,6 +1330,61 @@ function App() {
     }
   };
 
+  const MAX_AVATAR_PX = 400;
+  const handleAvatarUpload = (file) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setAvatarUploading(true);
+    const token = localStorage.getItem('token');
+    if (!token) { setAvatarUploading(false); return; }
+    const finish = (dataUrl) => {
+      fetch('/api/profile/avatar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ avatar: dataUrl })
+      })
+        .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) throw new Error(data.error || 'Upload failed');
+          setAccount((prev) => (prev ? { ...prev, avatar: data.user.avatar } : { avatar: data.user.avatar }));
+          localStorage.setItem('user_avatar', data.user.avatar);
+          if (user) setUser((prev) => (prev ? { ...prev, avatar: data.user.avatar } : null));
+          if (socket) socket.emit('update-avatar', { avatar: data.user.avatar });
+          addToast('Profile photo updated.', 'info');
+        })
+        .catch((err) => addToast(err.message || 'Upload failed', 'error'))
+        .finally(() => setAvatarUploading(false));
+    };
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let w = img.width;
+      let h = img.height;
+      if (w > MAX_AVATAR_PX || h > MAX_AVATAR_PX) {
+        if (w > h) {
+          h = Math.round((h * MAX_AVATAR_PX) / w);
+          w = MAX_AVATAR_PX;
+        } else {
+          w = Math.round((w * MAX_AVATAR_PX) / h);
+          h = MAX_AVATAR_PX;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      finish(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      const fr = new FileReader();
+      fr.onload = (e) => finish(e.target.result);
+      fr.readAsDataURL(file);
+    };
+    img.src = url;
+  };
+
   if (!localStorage.getItem('token')) {
     return (
       <div className="office-container">
@@ -1354,18 +1419,49 @@ function App() {
           onClick={() => setIsUserMenuOpen(o => !o)}
           title={account?.name || 'Account'}
         >
-          <span style={{ fontSize: 18 }}>{account?.avatar || localStorage.getItem('user_avatar') || '👤'}</span>
+          <Avatar name={account?.name || 'User'} avatar={account?.avatar || localStorage.getItem('user_avatar')} size={36} />
         </button>
         {isUserMenuOpen && (
           <div className="user-menu">
             <div className="user-menu-header">
-              <div className="user-menu-avatar">{account?.avatar || '👤'}</div>
+              <Avatar name={account?.name || 'User'} avatar={account?.avatar || localStorage.getItem('user_avatar')} size={48} className="user-menu-avatar" />
               <div className="user-menu-name">{account?.name || 'User'}</div>
               {account?.email && (<div className="user-menu-email">{account.email}</div>)}
             </div>
+            <input
+              ref={avatarUploadRef}
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleAvatarUpload(file);
+                e.target.value = '';
+              }}
+            />
             <div className="user-menu-actions">
               <div className="user-menu-item" style={{ display: 'grid', gap: 10 }}>
                 <div style={{ fontWeight: 800, color: '#F3F4F6', fontSize: 13 }}>Settings</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ color: '#E5E7EB', fontSize: 12 }}>Profile photo</div>
+                  <button
+                    type="button"
+                    disabled={avatarUploading}
+                    onClick={() => avatarUploadRef.current?.click()}
+                    style={{
+                      background: 'rgba(100,255,218,0.15)',
+                      border: '1px solid rgba(100,255,218,0.35)',
+                      color: '#E5E7EB',
+                      borderRadius: 8,
+                      padding: '6px 10px',
+                      cursor: avatarUploading ? 'not-allowed' : 'pointer',
+                      fontSize: 12,
+                      fontWeight: 600
+                    }}
+                  >
+                    {avatarUploading ? 'Uploading…' : 'Change photo'}
+                  </button>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                   <div style={{ color: '#E5E7EB', fontSize: 12 }}>Message notifications</div>
                   <button
@@ -1504,7 +1600,7 @@ function App() {
                       )}
                       <div style={{ position: 'absolute', left: 8, bottom: 8, right: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 16 }}>{u.avatar || '🖥️'}</span>
+                          <Avatar name={u.name} avatar={u.avatar} size={24} />
                           <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
                             <span style={{ fontSize: 12, fontWeight: 800 }}>{u.name}</span>
                             <span style={{ fontSize: 10, opacity: 0.9 }}>{(isMinimizedVideoHere || (u.id === user?.id && isCamOn && videoMinimizedIds.includes(user.id))) ? 'Video' : 'Screen Share'}</span>
@@ -1518,7 +1614,7 @@ function App() {
                     </div>
                   ) : (
                     <>
-                      <span style={{ fontSize: 24 }}>{u.avatar || '👤'}</span>
+                      <Avatar name={u.name} avatar={u.avatar} size={32} />
                       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                         <span style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ width: 8, height: 8, borderRadius: 999, background: (u.presence || 'available') === 'dnd' ? '#EF4444' : (u.presence || 'available') === 'busy' ? '#F59E0B' : '#10B981' }} />
@@ -1549,7 +1645,7 @@ function App() {
               <div style={{ width: 'min(420px, 92vw)', background: 'rgba(17,17,17,0.95)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 42, height: 42, borderRadius: 12, display: 'grid', placeItems: 'center', fontSize: 24, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}>{u.avatar || '👤'}</div>
+                    <Avatar name={u.name} avatar={u.avatar} size={42} />
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <div style={{ color: '#F3F4F6', fontWeight: 800, fontSize: 16 }}>{u.name}</div>
                       {(() => {
@@ -1981,7 +2077,7 @@ function App() {
                           }}
                           style={{ cursor: isSharer ? 'pointer' : 'default', outline: w.id === fullScreenSharerId ? '2px solid #64FFDA' : undefined }}
                         >
-                          <span className="ss-avatar-emoji">{w.avatar || '👤'}</span>
+                          <Avatar name={w.name} avatar={w.avatar} size={32} className="ss-avatar-inner" />
                           {fsViewersExpanded && (<span className="ss-avatar-name">{w.name}</span>)}
                         </div>
                       );
@@ -2023,7 +2119,7 @@ function App() {
                 const isActive = id === fullScreenSharerId;
                 return (
                   <button key={id} className={`ss-switcher-item ${isActive ? 'active' : ''}`} title={u?.name || 'Screen'} onClick={() => setFullScreenSharerId(id)}>
-                    <span className="ss-switcher-emoji">{u?.avatar || '🖥️'}</span>
+                    <Avatar name={u?.name || 'Screen'} avatar={u?.avatar} size={24} className="ss-switcher-avatar" />
                     <span className="ss-switcher-name">{u?.name || 'Screen'}</span>
                   </button>
                 );
@@ -2078,7 +2174,7 @@ function App() {
                 const isActive = id === fullScreenVideoId;
                 return (
                   <button key={id} className={`ss-switcher-item ${isActive ? 'active' : ''}`} title={u?.name || 'Camera'} onClick={() => setFullScreenVideoId(id)}>
-                    <span className="ss-switcher-emoji">{u?.avatar || '📷'}</span>
+                    <Avatar name={u?.name || 'Camera'} avatar={u?.avatar} size={24} className="ss-switcher-avatar" />
                     <span className="ss-switcher-name">{u?.name || 'Camera'}</span>
                   </button>
                 );
@@ -2155,7 +2251,7 @@ function App() {
               ) : (
                 appNotifs.map(n => (
                   <div key={n.id} style={{ display: 'grid', gridTemplateColumns: '36px 1fr auto', gap: 10, alignItems: 'center', padding: 8, borderRadius: 10, background: n.read ? 'transparent' : 'rgba(255,255,255,0.06)' }}>
-                    <div style={{ fontSize: 20, width: 36, height: 36, display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8 }}>{n.fromAvatar || '👤'}</div>
+                    <Avatar name={n.fromName || 'User'} avatar={n.fromAvatar} size={36} />
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                         <span style={{ fontSize: 13, fontWeight: 800, color: '#F3F4F6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.fromName || 'User'}</span>

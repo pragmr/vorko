@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { isAvatarImage, getInitials, getAvatarColorFromName } from '../utils/avatar';
 
 const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTiles = 3, isSharingActive = false, onClick, onManualMove, isWalking = false }) => {
   const characterRef = useRef(null);
@@ -47,20 +48,6 @@ const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTile
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [user.position, onMove, isCurrentUser]);
 
-  const getAvatarColor = (avatar) => {
-    const colors = {
-      '👨': '#4A90E2',
-      '👩': '#E91E63',
-      '👦': '#8BC34A',
-      '👧': '#FF9800',
-      '🧑': '#9C27B0',
-      '👴': '#607D8B',
-      '👵': '#FF5722',
-      '🤖': '#795548'
-    };
-    return colors[avatar] || '#64FFDA';
-  };
-
   const presence = user.presence || 'available';
   const presenceColor = presence === 'dnd' ? '#EF4444' : presence === 'busy' ? '#F59E0B' : '#10B981';
 
@@ -89,14 +76,17 @@ const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTile
         className={`character${isWalking ? ' walking' : ''}`}
         style={{
           position: 'relative',
-          backgroundColor: getAvatarColor(user.avatar),
           border: isCurrentUser ? '3px solid #64FFDA' : '2px solid #ffffff',
           boxShadow: isSharingActive ? '0 0 0 2px rgba(239,68,68,0.9), 0 0 18px rgba(239,68,68,0.7)' : undefined
         }}
         title={user.name}
         onClick={onClick}
       >
-        {user.avatar}
+        {isAvatarImage(user.avatar) ? (
+          <img src={user.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
+        ) : (
+          <span style={{ backgroundColor: getAvatarColorFromName(user.name), color: '#fff', fontWeight: 700, fontSize: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', borderRadius: 'inherit' }}>{getInitials(user.name)}</span>
+        )}
         <div className="character-name" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 8, height: 8, borderRadius: 999, background: presenceColor }} />
           {user.name}

@@ -24,7 +24,7 @@ const io = socketIo(server, {
 });
 
 app.use(cors({ origin: true }));
-app.use(express.json());
+app.use(express.json({ limit: '6mb' }));
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- Simple JSON file store for user accounts (no native build needed) ---
@@ -44,6 +44,13 @@ if (!fs.existsSync(roomMessagesFile)) {
 if (!fs.existsSync(dmMessagesFile)) {
   fs.writeFileSync(dmMessagesFile, JSON.stringify({}, null, 2));
 }
+
+// Profile uploads (avatar images)
+const uploadsDir = path.join(dataDir, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
 
 function readUsers() {
   try {
@@ -141,6 +148,52 @@ app.get('/api/auth/me', (req, res) => {
   return res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
 });
 
+// --- Profile avatar upload (base64 data URL) ---
+const ALLOWED_MIMES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp' };
+const MAX_AVATAR_BASE64 = 5 * 1024 * 1024; // 5MB
+
+app.post('/api/profile/avatar', (req, res) => {
+  const payload = verifyAuthHeader(req);
+  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
+  const user = findUserById(payload.userId);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const dataUrl = req.body?.avatar;
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'Invalid avatar: expected data URL (data:image/...)' });
+  }
+  const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+  if (!match) return res.status(400).json({ error: 'Invalid avatar format' });
+  const mime = match[1];
+  const ext = ALLOWED_MIMES[mime];
+  if (!ext) return res.status(400).json({ error: 'Allowed types: JPEG, PNG, GIF, WebP' });
+  const base64 = match[2];
+  if (Buffer.byteLength(base64, 'utf8') > MAX_AVATAR_BASE64) {
+    return res.status(400).json({ error: 'Image too large (max 5MB)' });
+  }
+  let buf;
+  try {
+    buf = Buffer.from(base64, 'base64');
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid base64' });
+  }
+  const safeId = String(user.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `avatar-${safeId}.${ext}`;
+  const filepath = path.join(uploadsDir, filename);
+  try {
+    fs.writeFileSync(filepath, buf);
+  } catch (e) {
+    return res.status(500).json({ error: 'Failed to save image' });
+  }
+  const avatarUrl = `/uploads/${filename}`;
+  const users = readUsers();
+  const idx = users.findIndex(u => String(u.id) === String(user.id));
+  if (idx === -1) return res.status(500).json({ error: 'User not found' });
+  users[idx].avatar = avatarUrl;
+  writeUsers(users);
+  return res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: avatarUrl } });
+});
+
 // --- Utility: messages storage ---
 function readRoomMessages() {
   try {
@@ -172,7 +225,7 @@ function conversationKey(userIdA, userIdB) {
 
 // --- Public user directory (sanitized) ---
 app.get('/api/users', (req, res) => {
-  const users = readUsers().map(u => ({ id: u.id, name: u.name, avatar: u.avatar || '👤', email: u.email }));
+  const users = readUsers().map(u => ({ id: u.id, name: u.name, avatar: u.avatar || '', email: u.email }));
   res.json({ users });
 });
 
@@ -323,7 +376,7 @@ io.on('connection', (socket) => {
   socket.on('join-office', (userData) => {
     const dbUser = findUserById(socket.data.userId);
     const name = dbUser?.name || socket.data.name || userData.name;
-    const avatar = userData.avatar || dbUser?.avatar || '👤';
+    const avatar = (userData.avatar || dbUser?.avatar || '').trim();
     connectedUsers.set(socket.id, {
       id: socket.id,
       userId: socket.data.userId,
@@ -367,6 +420,17 @@ io.on('connection', (socket) => {
       .filter(([sid, info]) => info.room === userData.room)
       .map(([sid]) => sid);
     socket.emit('video-active', { broadcasterIds: roomVideo });
+  });
+
+  // Update avatar in real time (after profile upload)
+  socket.on('update-avatar', (data) => {
+    const user = connectedUsers.get(socket.id);
+    if (!user || !data || typeof data.avatar !== 'string') return;
+    const avatar = data.avatar.trim();
+    user.avatar = avatar;
+    if (user.room) {
+      io.to(user.room).emit('user-avatar-updated', { id: socket.id, avatar });
+    }
   });
 
   // Handle user movement
@@ -480,7 +544,7 @@ io.on('connection', (socket) => {
     if (!sender || !toUserId || !text || !String(text).trim()) return;
 
     const senderProfile = findUserById(sender.userId) || { name: sender.name, avatar: sender.avatar };
-    const recipientProfile = findUserById(toUserId) || { name: 'Unknown', avatar: '👤' };
+    const recipientProfile = findUserById(toUserId) || { name: 'Unknown', avatar: '' };
     const timestamp = new Date().toISOString();
 
     const message = {

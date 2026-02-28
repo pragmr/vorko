@@ -3,10 +3,8 @@ import React, { useState } from 'react';
 const Controls = ({ onJoinOffice, onRoomChange, currentRoom, user, account, collapsed, onToggle }) => {
   const [formData, setFormData] = useState({
     name: account?.name || localStorage.getItem('user_name') || '',
-    avatar: account?.avatar || localStorage.getItem('user_avatar') || '👨'
+    avatar: account?.avatar || localStorage.getItem('user_avatar') || ''
   });
-
-  const avatars = ['👨', '👩', '👦', '👧', '🧑', '👴', '👵', '🤖'];
   const rooms = [
     { id: 'main-office', name: 'Main Office' },
     { id: 'meeting-room', name: 'Meeting Room' },
@@ -59,7 +57,7 @@ const Controls = ({ onJoinOffice, onRoomChange, currentRoom, user, account, coll
         <div className="control-group">
           <label>Current User:</label>
           <p style={{ color: '#64ffda', marginTop: '5px' }}>
-            {user.name} ({user.avatar})
+            {user.name}
           </p>
         </div>
         </>
@@ -87,22 +85,6 @@ const Controls = ({ onJoinOffice, onRoomChange, currentRoom, user, account, coll
             placeholder="Enter your name"
             required
           />
-        </div>
-
-        <div className="control-group">
-          <label htmlFor="avatar">Choose Avatar:</label>
-          <select
-            id="avatar"
-            name="avatar"
-            value={formData.avatar}
-            onChange={handleInputChange}
-          >
-            {avatars.map(avatar => (
-              <option key={avatar} value={avatar}>
-                {avatar} {avatar === '👨' ? 'Person' : ''}
-              </option>
-            ))}
-          </select>
         </div>
 
         <button type="submit" className="btn">

@@ -4,11 +4,9 @@ const API_BASE = '';
 
 export default function Auth({ onAuthSuccess }) {
   const [mode, setMode] = useState('login');
-  const [form, setForm] = useState({ name: '', email: '', password: '', avatar: '👨' });
+  const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const avatars = ['👨', '👩', '👦', '👧', '🧑', '👴', '👵', '🤖'];
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -27,7 +25,7 @@ export default function Auth({ onAuthSuccess }) {
           name: form.name,
           email: form.email,
           password: form.password,
-          avatar: form.avatar,
+          avatar: '',
         }),
       });
       const data = await res.json();
@@ -35,6 +33,7 @@ export default function Auth({ onAuthSuccess }) {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user_name', data.user?.name || '');
       if (data.user?.avatar) localStorage.setItem('user_avatar', data.user.avatar);
+      else localStorage.removeItem('user_avatar');
       onAuthSuccess?.();
       window.location.reload();
     } catch (err) {
@@ -69,24 +68,6 @@ export default function Auth({ onAuthSuccess }) {
             <label htmlFor="password">Password</label>
             <input id="password" type="password" name="password" value={form.password} onChange={handleChange} required />
           </div>
-          {mode === 'register' && (
-            <div className="control-group">
-              <label htmlFor="avatar">Avatar</label>
-              <div className="avatar-grid">
-                {avatars.map((a) => (
-                  <button
-                    key={a}
-                    type="button"
-                    className={`avatar-item ${form.avatar === a ? 'selected' : ''}`}
-                    onClick={() => setForm({ ...form, avatar: a })}
-                    aria-pressed={form.avatar === a}
-                  >
-                    <span className="avatar-emoji" role="img" aria-label="avatar">{a}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           <button type="submit" className="btn auth-submit" disabled={loading}>
             {loading ? 'Please wait…' : mode === 'login' ? 'Login' : 'Register'}
           </button>
