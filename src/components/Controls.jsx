@@ -24,47 +24,41 @@ const Controls = ({ onJoinOffice, onRoomChange, currentRoom, user, account, coll
     });
   };
 
+  /* After join, office control panel not needed — only show Join Vorko until user joins */
   if (user) {
-    return (
-      <div className="controls">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <h3>Office Controls</h3>
-          <button className="panel-close" onClick={onToggle} aria-label={collapsed ? 'Open controls' : 'Close controls'}>{collapsed ? '⚙' : '✕'}</button>
-        </div>
-        {collapsed ? null : (
-        <>
-        <div className="control-group">
-          <label>Current Room:</label>
-          <select 
-            value={currentRoom} 
-            onChange={(e) => onRoomChange(e.target.value)}
-          >
-            {rooms.map(room => (
-              <option key={room.id} value={room.id}>
-                {room.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        
-        <div className="control-group">
-          <label>Movement:</label>
-          <p style={{ fontSize: '12px', color: '#b0b0b0', marginTop: '5px' }}>
-            Use Arrow Keys to move. Double-click anywhere to walk there.
-          </p>
-        </div>
-
-        <div className="control-group">
-          <label>Current User:</label>
-          <p style={{ color: '#64ffda', marginTop: '5px' }}>
-            {user.name}
-          </p>
-        </div>
-        </>
-        )}
-      </div>
-    );
+    return null;
   }
+  // Commented out: Office Controls panel (room selector, movement hint, current user)
+  // if (user) {
+  //   return (
+  //     <div className="controls">
+  //       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+  //         <h3>Office Controls</h3>
+  //         <button className="panel-close" onClick={onToggle} aria-label={collapsed ? 'Open controls' : 'Close controls'}>{collapsed ? '⚙' : '✕'}</button>
+  //       </div>
+  //       {collapsed ? null : (
+  //       <>
+  //       <div className="control-group">
+  //         <label>Current Room:</label>
+  //         <select value={currentRoom} onChange={(e) => onRoomChange(e.target.value)}>
+  //           {rooms.map(room => (<option key={room.id} value={room.id}>{room.name}</option>))}
+  //         </select>
+  //       </div>
+  //       <div className="control-group">
+  //         <label>Movement:</label>
+  //         <p style={{ fontSize: '12px', color: '#b0b0b0', marginTop: '5px' }}>
+  //           Use Arrow Keys to move. Double-click anywhere to walk there.
+  //         </p>
+  //       </div>
+  //       <div className="control-group">
+  //         <label>Current User:</label>
+  //         <p style={{ color: '#64ffda', marginTop: '5px' }}>{user.name}</p>
+  //       </div>
+  //       </>
+  //       )}
+  //     </div>
+  //   );
+  // }
 
   return (
     <div className="controls">

@@ -315,22 +315,22 @@ body {
 
 .character {
   position: absolute;
-  width: 42px;
-  height: 42px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
-  font-size: 18px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.3s ease;
   z-index: 1000;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   background: linear-gradient(135deg, #64ffda, #4cd6b3);
   color: #0f0f23;
-  border: 3px solid #64ffda;
+  border: 2px solid #64ffda;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   pointer-events: auto;
 }
@@ -352,14 +352,14 @@ body {
 
 .character-name {
   position: absolute;
-  top: -30px;
+  top: -22px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.9);
   color: white;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 10px;
   white-space: nowrap;
   opacity: 1; /* always visible */
   transition: opacity 0.3s ease;
