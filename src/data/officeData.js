@@ -1,3 +1,9 @@
+/** Set to a path (e.g. '/office-bg.png') to use a custom office image as background. Put the image in public/. */
+export const OFFICE_BACKGROUND_IMAGE = '/office-bg.png';
+
+/** Greenery background tiled outside the office (walls). Put image in public/ or use built-in greenery-bg.svg. */
+export const GREENERY_BACKGROUND_IMAGE = '/greenery-bg.png';
+
 export const officeLayout = {
   'main-office': {
     name: 'Main Office',

@@ -63,10 +63,11 @@ body {
   width: 100vw;
   height: 100vh;
   position: relative;
-  /* Forest twilight gradient */
-  background: radial-gradient(1200px 800px at 20% -10%, #0d2a21 0%, rgba(13, 42, 33, 0.6) 50%, transparent 70%),
-              radial-gradient(1000px 700px at 85% -5%, #0a2921 0%, rgba(10, 41, 33, 0.5) 55%, transparent 75%),
-              linear-gradient(180deg, #0b1d16 0%, #061f17 100%);
+  /* Greenery tiled outside office; fallback and overlay gradient */
+  background-color: #1e2a1c;
+  background-image: url('/greenery-bg.png');
+  background-repeat: repeat;
+  background-size: 500px 500px;
   overflow: hidden;
 }
 
@@ -142,7 +143,10 @@ body {
   height: 100%;
   position: relative;
   overflow: hidden;
-  /* Transparent to reveal forest background outside the office grid */
+  /* Center the office grid so greenery shows in empty space around it */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   pointer-events: none;
 }
@@ -210,11 +214,15 @@ body {
 
 .office-grid {
   display: grid;
+  /* Size to aspect ratio so greenery shows around the room; aspect-ratio set inline from layout */
   width: 100%;
-  height: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
   position: relative;
   transition: transform 0.1s ease;
   pointer-events: auto;
+  flex-shrink: 0;
 }
 
 .office-tile {
@@ -284,6 +292,20 @@ body {
 .office-tile.door {
   background: #8b4513;
   border-color: #a0522d;
+}
+
+/* When using a custom office background image, only floor tiles are transparent so the image shows; wall stays visible */
+.office-tile.office-tile--transparent,
+.office-grid--image-bg .office-tile.floor {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+.office-grid--image-bg .office-tile.floor::before {
+  display: none;
+}
+.office-grid--image-bg .office-tile.floor:hover {
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 .office-tile.window {

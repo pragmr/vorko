@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { officeLayout, officeObjects } from '../data/officeData';
+import { officeLayout, officeObjects, OFFICE_BACKGROUND_IMAGE } from '../data/officeData';
 
 const OfficeGrid = ({ currentRoom, children, onDoubleClickTile }) => {
   const currentLayout = officeLayout[currentRoom] || officeLayout['main-office'];
   const currentObjects = officeObjects[currentRoom] || officeObjects['main-office'];
+  const useImageBackground = Boolean(OFFICE_BACKGROUND_IMAGE);
   
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -228,13 +229,16 @@ const OfficeGrid = ({ currentRoom, children, onDoubleClickTile }) => {
       {/* Office Grid with Characters */}
       <div 
         ref={gridRef}
-        className="office-grid" 
+        className={`office-grid ${useImageBackground ? 'office-grid--image-bg' : ''}`}
         style={{
           display: 'grid',
           gridTemplateColumns: `repeat(${currentLayout.grid[0].length}, 1fr)`,
           gridTemplateRows: `repeat(${currentLayout.grid.length}, 1fr)`,
           width: '100%',
-          height: '100%',
+          maxHeight: '100%',
+          aspectRatio: `${currentLayout.grid[0].length} / ${currentLayout.grid.length}`,
+          minWidth: 960,
+          minHeight: 800,
           position: 'relative',
           transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
           transformOrigin: '0 0',
@@ -258,18 +262,41 @@ const OfficeGrid = ({ currentRoom, children, onDoubleClickTile }) => {
           onDoubleClickTile?.({ x: tx, y: ty });
         }}
       >
+        {/* Office image only in floor area so wall stays visible around it */}
+        {useImageBackground && (
+          <div
+            className="office-floor-bg"
+            style={{
+              position: 'absolute',
+              /* Floor area = room interior; inset by one tile (wall) on each side */
+              left: `${(1 / currentLayout.grid[0].length) * 100}%`,
+              top: `${(1 / currentLayout.grid.length) * 100}%`,
+              right: `${(1 / currentLayout.grid[0].length) * 100}%`,
+              bottom: `${(1 / currentLayout.grid.length) * 100}%`,
+              backgroundImage: `url(${OFFICE_BACKGROUND_IMAGE})`,
+              /* Size image to match room (floor) size exactly */
+              backgroundSize: '100% 100%',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+              pointerEvents: 'none',
+              zIndex: 0
+            }}
+          />
+        )}
         {currentLayout.grid.map((row, y) =>
           row.map((tile, x) => (
             <div
               key={`${x}-${y}`}
-              className={`office-tile ${tile === 'W' ? 'wall' : 'floor'}`}
+              className={`office-tile ${tile === 'W' ? 'wall' : 'floor'} ${useImageBackground && tile !== 'W' ? 'office-tile--transparent' : ''}`}
             />
           ))
         )}
         
-        <div className="office-objects">
-          {currentObjects.map(obj => renderOfficeObject(obj))}
-        </div>
+        {!useImageBackground && (
+          <div className="office-objects">
+            {currentObjects.map(obj => renderOfficeObject(obj))}
+          </div>
+        )}
 
         {/* Characters Container - Now part of the zoomable area */}
         <div className="characters-container">
