@@ -180,7 +180,7 @@ function App() {
     setTimeout(() => setToasts((prev) => prev.filter(t => t.id !== id)), ttlMs);
   };
 
-  const PROXIMITY_RADIUS = 3; // tiles
+  const PROXIMITY_RADIUS = 2; // tiles — meeting/video/screen connect when characters are this close
   const MAX_VIDEO_SUBSCRIPTIONS = 12; // cap concurrent video PCs to keep UI stable
 
   // Nearby users within radius (sorted by distance)
