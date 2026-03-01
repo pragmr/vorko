@@ -753,21 +753,25 @@ function App() {
       // I am speaker, listener requests subscription
       if (!isMicOn || !localMicStreamRef.current) return;
       if (speakerPeerConnsRef.current.has(from)) {
-        try { speakerPeerConnsRef.current.get(from).close(); } catch {}
+        const oldPc = speakerPeerConnsRef.current.get(from);
+        try { for (const s of (oldPc?.getSenders?.() || [])) { const t = s.track; if (t) t.stop(); } oldPc?.close(); } catch {}
         speakerPeerConnsRef.current.delete(from);
       }
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       speakerPeerConnsRef.current.set(from, pc);
-      for (const track of localMicStreamRef.current.getTracks()) {
+      // Clone track per listener so every listener receives audio (same track to multiple PCs can fail in some browsers)
+      const stream = localMicStreamRef.current;
+      for (const track of stream.getTracks()) {
         try { track.contentHint = 'speech'; } catch {}
-        pc.addTrack(track, localMicStreamRef.current);
+        const clone = track.clone();
+        pc.addTrack(clone, new MediaStream([clone]));
       }
       pc.onicecandidate = (ev) => {
         if (ev.candidate) socket.emit('audio-ice-candidate', { to: from, candidate: ev.candidate });
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-          try { pc.close(); } catch {}
+          try { for (const s of (pc.getSenders?.() || [])) { const t = s.track; if (t) t.stop(); } pc.close(); } catch {}
           speakerPeerConnsRef.current.delete(from);
         }
       };
@@ -776,7 +780,7 @@ function App() {
         await pc.setLocalDescription(offer);
         socket.emit('audio-webrtc-offer', { to: from, sdp: pc.localDescription });
       } catch (e) {
-        try { pc.close(); } catch {}
+        try { for (const s of (pc.getSenders?.() || [])) { const t = s.track; if (t) t.stop(); } pc.close(); } catch {}
         speakerPeerConnsRef.current.delete(from);
       }
     };
@@ -784,7 +788,7 @@ function App() {
     const onUnsubscribe = ({ from }) => {
       const pc = speakerPeerConnsRef.current.get(from);
       if (pc) {
-        try { pc.close(); } catch {}
+        try { for (const s of (pc.getSenders?.() || [])) { const t = s.track; if (t) t.stop(); } pc.close(); } catch {}
         speakerPeerConnsRef.current.delete(from);
       }
     };
@@ -1038,9 +1042,10 @@ function App() {
     const set = new Set(activeSpeakerIds);
     const subscribed = new Set(Array.from(listenerPeerConnsRef.current.keys()));
 
-    // Determine which speakers are within radius
+    // Determine which speakers are within radius (exclude self so we don't subscribe to our own mic)
     const eligible = [];
     for (const speakerId of set) {
+      if (speakerId === user.id) continue;
       const u = users.find(x => x.id === speakerId && x.room === user.room);
       if (!u) continue;
       const dx = (u.position?.x || 0) - (user.position?.x || 0);
