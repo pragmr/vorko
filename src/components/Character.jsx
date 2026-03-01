@@ -1,7 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, memo } from 'react';
 import { isAvatarImage, getInitials, getAvatarColorFromName } from '../utils/avatar';
 
-const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTiles = 3, isSharingActive = false, onClick, onManualMove, isWalking = false }) => {
+const Character = memo(function Character({ user, onMove, isCurrentUser, showRadius = false, radiusTiles = 3, isSharingActive = false, onClick, onManualMove, isWalking = false }) {
   const characterRef = useRef(null);
 
   useEffect(() => {
@@ -97,6 +97,6 @@ const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTile
       </div>
     </div>
   );
-};
+});
 
 export default Character;

@@ -1,52 +1,108 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { officeLayout, officeObjects, OFFICE_BACKGROUND_IMAGE } from '../data/officeData';
 
+// Throttle pan updates to once per frame to avoid flooding React on mobile
+function useThrottledPan(initialPan) {
+  const [pan, setPan] = useState(initialPan);
+  const panRef = useRef(initialPan);
+  const rafIdRef = useRef(null);
+  const pendingRef = useRef(null);
+
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
+  const setPanThrottled = (next) => {
+    if (typeof next === 'function') {
+      pendingRef.current = next;
+    } else {
+      pendingRef.current = () => next;
+    }
+    if (rafIdRef.current != null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      const fn = pendingRef.current;
+      pendingRef.current = null;
+      if (fn) setPan(fn(panRef.current));
+    });
+  };
+
+  return [pan, setPanThrottled];
+}
+
 const OfficeGrid = ({ currentRoom, children, onDoubleClickTile }) => {
   const currentLayout = officeLayout[currentRoom] || officeLayout['main-office'];
   const currentObjects = officeObjects[currentRoom] || officeObjects['main-office'];
   const useImageBackground = Boolean(OFFICE_BACKGROUND_IMAGE);
   
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [pan, setPan] = useThrottledPan({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const panRef = useRef(pan);
+  panRef.current = pan;
   
   const gridRef = useRef(null);
+  const touchDraggingRef = useRef(false);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+  const gridMinWidth = isMobile ? 320 : 960;
+  const gridMinHeight = isMobile ? 400 : 800;
 
   const handleWheel = (e) => {
+    e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     const newZoom = Math.max(0.5, Math.min(3, zoom * delta));
-    
-    // Zoom towards mouse position
-    const rect = gridRef.current.getBoundingClientRect();
+    const rect = gridRef.current?.getBoundingClientRect();
+    if (!rect) return;
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-    
     const zoomRatio = newZoom / zoom;
-    const newPanX = mouseX - (mouseX - pan.x) * zoomRatio;
-    const newPanY = mouseY - (mouseY - pan.y) * zoomRatio;
-    
+    const newPanX = mouseX - (mouseX - panRef.current.x) * zoomRatio;
+    const newPanY = mouseY - (mouseY - panRef.current.y) * zoomRatio;
     setZoom(newZoom);
     setPan({ x: newPanX, y: newPanY });
   };
 
   const handleMouseDown = (e) => {
-    if (e.button === 0) { // Left click only
+    if (e.button === 0) {
       setIsDragging(true);
-      setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      dragStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
     }
   };
 
   const handleMouseMove = (e) => {
     if (isDragging) {
       setPan({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y
+        x: e.clientX - dragStartRef.current.x,
+        y: e.clientY - dragStartRef.current.y
       });
     }
   };
 
   const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleTouchStart = (e) => {
+    if (e.touches.length === 1) {
+      touchDraggingRef.current = true;
+      setIsDragging(true);
+      dragStartRef.current = { x: e.touches[0].clientX - panRef.current.x, y: e.touches[0].clientY - panRef.current.y };
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (e.touches.length === 1 && touchDraggingRef.current) {
+      e.preventDefault();
+      setPan({
+        x: e.touches[0].clientX - dragStartRef.current.x,
+        y: e.touches[0].clientY - dragStartRef.current.y
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchDraggingRef.current = false;
     setIsDragging(false);
   };
 
@@ -237,22 +293,28 @@ const OfficeGrid = ({ currentRoom, children, onDoubleClickTile }) => {
           width: '100%',
           maxHeight: '100%',
           aspectRatio: `${currentLayout.grid[0].length} / ${currentLayout.grid.length}`,
-          minWidth: 960,
-          minHeight: 800,
+          minWidth: gridMinWidth,
+          minHeight: gridMinHeight,
           position: 'relative',
           transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
           transformOrigin: '0 0',
-          cursor: isDragging ? 'grabbing' : 'grab'
+          cursor: isDragging ? 'grabbing' : 'grab',
+          touchAction: 'none'
         }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         onDoubleClick={(e) => {
           if (!gridRef.current) return;
           const rect = gridRef.current.getBoundingClientRect();
-          const xPx = (e.clientX - rect.left - pan.x) / zoom;
-          const yPx = (e.clientY - rect.top - pan.y) / zoom;
+          const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+          const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+          const xPx = (clientX - rect.left - pan.x) / zoom;
+          const yPx = (clientY - rect.top - pan.y) / zoom;
           const cols = currentLayout.grid[0].length;
           const rows = currentLayout.grid.length;
           const tileW = rect.width / cols;

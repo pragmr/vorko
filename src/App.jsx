@@ -27,6 +27,10 @@ function App() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
+  // Throttle user-moved updates to reduce re-renders on mobile
+  const pendingMovesRef = useRef(new Map());
+  const moveFlushTimerRef = useRef(null);
+  const MOVE_FLUSH_MS = 120;
   // Movement state
   const [autoPath, setAutoPath] = useState([]); // array of {x,y} to walk to
   const [isWalking, setIsWalking] = useState(false);
@@ -532,12 +536,31 @@ function App() {
     };
   }, []);
 
-  // Socket: presence and movement handlers
+  // Socket: presence and movement handlers (user-moved throttled for mobile perf)
   useEffect(() => {
     if (!socket) return;
     const onJoined = (newUser) => setUsers(prev => [...prev.filter(u => u.id !== newUser.id), newUser]);
     const onLeft = (userId) => setUsers(prev => prev.filter(u => u.id !== userId));
-    const onMoved = (userData) => setUsers(prev => prev.map(u => u.id === userData.id ? { ...u, position: userData.position, room: userData.room, presence: userData.presence || u.presence } : u));
+    const flushMoves = () => {
+      moveFlushTimerRef.current = null;
+      const pending = pendingMovesRef.current;
+      if (pending.size === 0) return;
+      const snapshot = new Map(pending);
+      pending.clear();
+      setUsers(prev => {
+        let next = prev;
+        for (const [, userData] of snapshot) {
+          next = next.map(u => u.id === userData.id ? { ...u, position: userData.position, room: userData.room, presence: userData.presence || u.presence } : u);
+        }
+        return next;
+      });
+    };
+    const onMoved = (userData) => {
+      pendingMovesRef.current.set(userData.id, { ...userData });
+      if (moveFlushTimerRef.current == null) {
+        moveFlushTimerRef.current = setTimeout(flushMoves, MOVE_FLUSH_MS);
+      }
+    };
     const onPresenceChanged = ({ id, presence }) => setUsers(prev => prev.map(u => u.id === id ? { ...u, presence: presence || 'available' } : u));
     const onRoomUsers = (roomUsers) => setUsers(roomUsers.filter(u => u.id !== socket.id));
     const onAvatarUpdated = ({ id, avatar }) => {
@@ -553,6 +576,9 @@ function App() {
     socket.on('user-avatar-updated', onAvatarUpdated);
 
     return () => {
+      if (moveFlushTimerRef.current) clearTimeout(moveFlushTimerRef.current);
+      moveFlushTimerRef.current = null;
+      pendingMovesRef.current.clear();
       socket.off('user-joined', onJoined);
       socket.off('user-left', onLeft);
       socket.off('user-moved', onMoved);

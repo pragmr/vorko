@@ -49,20 +49,68 @@
       "created_at": "2025-09-25T07:22:52.929Z"
     },
     {
-      "id": "u_1772275191038_bha9wu",
-      "email": "siva@gmail.com",
-      "name": "siva",
-      "password_hash": "$2a$10$.4rbu8OU9RBusvJkoBKvm.RcY1yqr6IZxVoMktm9q61Ottl.cqBAq",
-      "avatar": "/uploads/avatar-u_1772275191038_bha9wu.jpg",
-      "created_at": "2026-02-28T10:39:51.037Z"
+      "id": "u_1772185842818_mezuhy",
+      "email": "abinesh.selvashanmugam@pragmr.com",
+      "name": "Abinesh",
+      "password_hash": "$2a$10$ef.3W.tfH8fsaNEx5hEEH.iyzWDAEr6XUb6E3j2mmy2NFVAVLz.tq",
+      "avatar": "👨",
+      "created_at": "2026-02-27T09:50:42.817Z"
     },
     {
-      "id": "u_1772344640733_14mwlc",
-      "email": "maha@gmail.com",
-      "name": "maha",
-      "password_hash": "$2a$10$icg2hNXF1gxgXIqwjCwSIOBRtjzZ0NbxejWDwosIzIj3c1I.aBTIW",
+      "id": "u_1772185866421_jave24",
+      "email": "siva@gmail.com",
+      "name": "siva",
+      "password_hash": "$2a$10$seQSL38vWT2evORluq.bcO4xOMax1W9/jDqTBgb6igYNnDaDZT0Y6",
+      "avatar": "👨",
+      "created_at": "2026-02-27T09:51:06.420Z"
+    },
+    {
+      "id": "u_1772187886389_42r8br",
+      "email": "hariharan.d@pragmr.com",
+      "name": "Hariharan",
+      "password_hash": "$2a$10$RukoUxWkyEDhgmNv6D8A1OCEACKbHnflbE1VrdFuTRK32Q/H7e9SG",
+      "avatar": "👨",
+      "created_at": "2026-02-27T10:24:46.389Z"
+    },
+    {
+      "id": "u_1772188339108_61cm21",
+      "email": "saravanan@gmail.com",
+      "name": "Saravanan",
+      "password_hash": "$2a$10$7FRhBTUDFVF5EW7OzpIzDeb0BdnScVor8hL6zue.xuu9bd841Btrm",
+      "avatar": "👦",
+      "created_at": "2026-02-27T10:32:19.108Z"
+    },
+    {
+      "id": "u_1772200403576_0pat0s",
+      "email": "krishna.chandran@pragmr.com",
+      "name": "Krishnakumar Chandran",
+      "password_hash": "$2a$10$1lLJ/DFM3elqvm8qaeAZ.e4oKG8Kll32TkGTl0ELanm.mAbZ6n81O",
+      "avatar": "👨",
+      "created_at": "2026-02-27T13:53:23.576Z"
+    },
+    {
+      "id": "u_1772203049650_3cbeik",
+      "email": "kannadasan.k@pragmr.com",
+      "name": "Kannadasan K",
+      "password_hash": "$2a$10$shYC8YMm6MdTWMB0IWnNTe8gFi1Cw2RoCPomR6xqCVSwT4IMTOWZK",
+      "avatar": "👨",
+      "created_at": "2026-02-27T14:37:29.650Z"
+    },
+    {
+      "id": "u_1772234511660_i5ll3k",
+      "email": "kirangurunaik@gmail.com",
+      "name": "Kiran",
+      "password_hash": "$2a$10$4QoNt9LHjcVvviQPHE/.OelAcEI6YtGVm0tnMGn4Xtq85A5QZDJ/2",
+      "avatar": "👩",
+      "created_at": "2026-02-27T23:21:51.660Z"
+    },
+    {
+      "id": "u_1772359090447_o6nxrw",
+      "email": "kiran@gmail.com",
+      "name": "Kiranmayee",
+      "password_hash": "$2a$10$tFhwyxmJpP9iTVcIGDvhp.hNpmbkDiohXCEHD.qeteNKjogHaRTBS",
       "avatar": null,
-      "created_at": "2026-03-01T05:57:20.733Z"
+      "created_at": "2026-03-01T09:58:10.447Z"
     }
   ]
 }
