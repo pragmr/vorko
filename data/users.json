@@ -69,7 +69,7 @@
       "email": "hariharan.d@pragmr.com",
       "name": "Hariharan",
       "password_hash": "$2a$10$RukoUxWkyEDhgmNv6D8A1OCEACKbHnflbE1VrdFuTRK32Q/H7e9SG",
-      "avatar": "👨",
+      "avatar": "/uploads/avatar-u_1772187886389_42r8br.jpg",
       "created_at": "2026-02-27T10:24:46.389Z"
     },
     {
@@ -93,7 +93,7 @@
       "email": "kannadasan.k@pragmr.com",
       "name": "Kannadasan K",
       "password_hash": "$2a$10$shYC8YMm6MdTWMB0IWnNTe8gFi1Cw2RoCPomR6xqCVSwT4IMTOWZK",
-      "avatar": "👨",
+      "avatar": "/uploads/avatar-u_1772203049650_3cbeik.jpg",
       "created_at": "2026-02-27T14:37:29.650Z"
     },
     {
@@ -111,6 +111,22 @@
       "password_hash": "$2a$10$tFhwyxmJpP9iTVcIGDvhp.hNpmbkDiohXCEHD.qeteNKjogHaRTBS",
       "avatar": null,
       "created_at": "2026-03-01T09:58:10.447Z"
+    },
+    {
+      "id": "u_1772434819521_y4d4m7",
+      "email": "ksri2035@gmail.com",
+      "name": "Sri",
+      "password_hash": "$2a$10$aI2lI.fuQc2Ufrn/7dwbvOpCzLZImbWJIDIKMY8J.e5eP77o651yW",
+      "avatar": "/uploads/avatar-u_1772434819521_y4d4m7.jpg",
+      "created_at": "2026-03-02T07:00:19.521Z"
+    },
+    {
+      "id": "u_1772450240920_fw56uz",
+      "email": "nazira.i@pragmr.com",
+      "name": "Nazira I",
+      "password_hash": "$2a$10$DUmOfo4wD5HzFi/I9VaTKOoPt/NUQx..6kOTFQApRwmG20dCWnXHy",
+      "avatar": null,
+      "created_at": "2026-03-02T11:17:20.920Z"
     }
   ]
 }

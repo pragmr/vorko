@@ -352,7 +352,7 @@ function emitWatchers(io, sharerId) {
       .filter(Boolean)
       .map((u) => ({ id: u.id, name: u.name, avatar: u.avatar }));
     io.to(room).emit('screenshare-watchers', { sharerId, watchers });
-  } catch {}
+  } catch { }
 }
 
 // Require auth via JWT in socket handshake
@@ -386,7 +386,7 @@ io.on('connection', (socket) => {
       room: userData.room,
       presence: userData.presence || 'available'
     });
-    
+
     // Broadcast to all users in the same room
     socket.join(userData.room);
     io.to(userData.room).emit('user-joined', {
@@ -398,7 +398,7 @@ io.on('connection', (socket) => {
       room: userData.room,
       presence: userData.presence || 'available'
     });
-    
+
     // Send current users in the room to the new user
     const roomUsers = Array.from(connectedUsers.values()).filter(user => user.room === userData.room);
     socket.emit('room-users', roomUsers);
@@ -627,19 +627,22 @@ io.on('connection', (socket) => {
   });
 
   // Generic WebRTC signaling relay
-  socket.on('webrtc-offer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('webrtc-offer', { from: socket.id, sdp });
+  socket.on('webrtc-offer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('webrtc-offer', { ...data, from: socket.id });
   });
 
-  socket.on('webrtc-answer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('webrtc-answer', { from: socket.id, sdp });
+  socket.on('webrtc-answer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('webrtc-answer', { ...data, from: socket.id });
   });
 
-  socket.on('webrtc-ice-candidate', ({ to, candidate }) => {
-    if (!to || !candidate) return;
-    io.to(to).emit('webrtc-ice-candidate', { from: socket.id, candidate });
+  socket.on('webrtc-ice-candidate', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('webrtc-ice-candidate', { ...data, from: socket.id });
   });
 
   // --- Proximity voice (mic) signaling (WebRTC over Socket.IO) ---
@@ -680,17 +683,20 @@ io.on('connection', (socket) => {
   });
 
   // Relay WebRTC for audio
-  socket.on('audio-webrtc-offer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('audio-webrtc-offer', { from: socket.id, sdp });
+  socket.on('audio-webrtc-offer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('audio-webrtc-offer', { ...data, from: socket.id });
   });
-  socket.on('audio-webrtc-answer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('audio-webrtc-answer', { from: socket.id, sdp });
+  socket.on('audio-webrtc-answer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('audio-webrtc-answer', { ...data, from: socket.id });
   });
-  socket.on('audio-ice-candidate', ({ to, candidate }) => {
-    if (!to || !candidate) return;
-    io.to(to).emit('audio-ice-candidate', { from: socket.id, candidate });
+  socket.on('audio-ice-candidate', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('audio-ice-candidate', { ...data, from: socket.id });
   });
 
   // --- Proximity camera video signaling (WebRTC over Socket.IO) ---
@@ -727,17 +733,20 @@ io.on('connection', (socket) => {
     io.to(broadcasterId).emit('video-unsubscribe', { from: socket.id });
   });
 
-  socket.on('video-webrtc-offer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('video-webrtc-offer', { from: socket.id, sdp });
+  socket.on('video-webrtc-offer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('video-webrtc-offer', { ...data, from: socket.id });
   });
-  socket.on('video-webrtc-answer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('video-webrtc-answer', { from: socket.id, sdp });
+  socket.on('video-webrtc-answer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('video-webrtc-answer', { ...data, from: socket.id });
   });
-  socket.on('video-ice-candidate', ({ to, candidate }) => {
-    if (!to || !candidate) return;
-    io.to(to).emit('video-ice-candidate', { from: socket.id, candidate });
+  socket.on('video-ice-candidate', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('video-ice-candidate', { ...data, from: socket.id });
   });
 
   // Wave feature: simple real-time notification
@@ -809,7 +818,7 @@ io.on('connection', (socket) => {
       for (const [sid, set] of watchersBySharer.entries()) {
         if (set.delete(socket.id)) emitWatchers(io, sid);
       }
-    } catch {}
+    } catch { }
     console.log('User disconnected:', socket.id);
   });
 });

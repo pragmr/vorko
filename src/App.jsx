@@ -31,10 +31,18 @@ function App() {
   const pendingMovesRef = useRef(new Map());
   const moveFlushTimerRef = useRef(null);
   const MOVE_FLUSH_MS = 120;
+  // When we had 2+ in proximity and now only 1 left, auto-stop mic (room ends)
+  const hadNearbyUsersForAudioRef = useRef(false);
+  // Avoid duplicate audio-subscribe when we already requested in onStarted (until offer arrives)
+  const pendingAudioSubscribeRef = useRef(new Set());
+  // When we added each speaker to pending (for retry if offer never arrives)
+  const pendingAudioSubscribeTimeRef = useRef(new Map());
+  const PENDING_AUDIO_RETRY_MS = 2800;
+  const [audioRetryTick, setAudioRetryTick] = useState(0);
   // Movement state
   const [autoPath, setAutoPath] = useState([]); // array of {x,y} to walk to
   const [isWalking, setIsWalking] = useState(false);
-  
+
   // Screen share and WebRTC state
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const localScreenStreamRef = useRef(null);
@@ -63,6 +71,10 @@ function App() {
   // const [isAudioConnected, setIsAudioConnected] = useState(false);
   // Proximity voice (mic via WebRTC P2P)
   const [isMicOn, setIsMicOn] = useState(false);
+  const isMicOnRef = useRef(false);
+  useEffect(() => {
+    isMicOnRef.current = isMicOn;
+  }, [isMicOn]);
   const localMicStreamRef = useRef(null);
   const speakerPeerConnsRef = useRef(new Map()); // as speaker: listenerSocketId -> RTCPeerConnection
   const listenerPeerConnsRef = useRef(new Map()); // as listener: speakerSocketId -> RTCPeerConnection
@@ -102,9 +114,9 @@ function App() {
           o2.connect(g2); g2.connect(ctx.destination);
           o2.start();
           o2.stop(ctx.currentTime + 0.18);
-        } catch {}
+        } catch { }
       }, 120);
-    } catch {}
+    } catch { }
   }
 
   function showBrowserNotification(title, body) {
@@ -112,8 +124,8 @@ function App() {
       if (typeof Notification === 'undefined') return;
       if (Notification.permission !== 'granted') return;
       const n = new Notification(title, { body });
-      setTimeout(() => { try { n.close(); } catch {} }, 6000);
-    } catch {}
+      setTimeout(() => { try { n.close(); } catch { } }, 6000);
+    } catch { }
   }
 
   const addMinimizedSharer = (id) => setMinimizedSharerIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
@@ -149,16 +161,16 @@ function App() {
       const body = String(text || '').slice(0, 140);
       const n = new Notification(title, { body });
       n.onclick = () => {
-        try { window.focus(); } catch {}
-        try { window.__openDm?.(peerUserId); } catch {}
-        try { n.close(); } catch {}
+        try { window.focus(); } catch { }
+        try { window.__openDm?.(peerUserId); } catch { }
+        try { n.close(); } catch { }
       };
-      setTimeout(() => { try { n.close(); } catch {} }, 6000);
-    } catch {}
+      setTimeout(() => { try { n.close(); } catch { } }, 6000);
+    } catch { }
   }
 
   function pushAppNotification({ type = 'dm', fromUserId, fromSocketId, fromName, fromAvatar, text, timestamp }) {
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     setAppNotifs(prev => [{ id, type, fromUserId, fromSocketId, fromName, fromAvatar, text, timestamp: timestamp || new Date().toISOString(), read: false }, ...prev].slice(0, 100));
   }
 
@@ -175,11 +187,11 @@ function App() {
       setUnreadByUserId(prev => ({ ...prev, [otherId]: 0 }));
       setAppNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
       setIsNotifOpen(false);
-    } catch {}
+    } catch { }
   }
   const [toasts, setToasts] = useState([]);
   const addToast = (text, type = 'info', ttlMs = 2800) => {
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     setToasts((prev) => [...prev, { id, text, type }]);
     setTimeout(() => setToasts((prev) => prev.filter(t => t.id !== id)), ttlMs);
   };
@@ -310,7 +322,7 @@ function App() {
         updateVideoTile(broadcasterId, { left, top, width, height, visible: true });
         return;
       }
-    } catch {}
+    } catch { }
     ensureVideoTile(broadcasterId, (users.find(u => u.id === broadcasterId)?.name) || 'Camera');
   }
 
@@ -337,7 +349,7 @@ function App() {
         updateScreenTile(sharerId, { left, top, width, height, visible: true });
         return;
       }
-    } catch {}
+    } catch { }
     dockScreenTileToTop(sharerId);
   }
 
@@ -346,13 +358,13 @@ function App() {
       // Stop
       try {
         localScreenStreamRef.current?.getTracks()?.forEach(t => t.stop());
-      } catch {}
+      } catch { }
       localScreenStreamRef.current = null;
       setIsSharingScreen(false);
-      try { socket?.emit('stop-screenshare'); } catch {}
+      try { socket?.emit('stop-screenshare'); } catch { }
       // Close all viewer peer connections
       for (const [, pc] of sharerPeerConnsRef.current) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
       }
       sharerPeerConnsRef.current.clear();
       return;
@@ -376,12 +388,12 @@ function App() {
         try {
           const senderParams = track.getSettings?.() || {};
           // Optional: tweak encoding on actual sender per peer later via setParameters
-        } catch {}
+        } catch { }
         track.onended = () => {
           setIsSharingScreen(false);
-          try { socket?.emit('stop-screenshare'); } catch {}
+          try { socket?.emit('stop-screenshare'); } catch { }
           for (const [, pc] of sharerPeerConnsRef.current) {
-            try { pc.close(); } catch {}
+            try { pc.close(); } catch { }
           }
           sharerPeerConnsRef.current.clear();
           localScreenStreamRef.current = null;
@@ -402,13 +414,14 @@ function App() {
   // Mic: start/stop and proximity auto-subscribe
   async function toggleMic() {
     if (isMicOn) {
-      try { localMicStreamRef.current?.getTracks()?.forEach(t => t.stop()); } catch {}
+      try { localMicStreamRef.current?.getTracks()?.forEach(t => t.stop()); } catch { }
       localMicStreamRef.current = null;
+      isMicOnRef.current = false;
       setIsMicOn(false);
-      try { socket?.emit('stop-audio'); } catch {}
+      try { socket?.emit('stop-audio'); } catch { }
       // Close all listener peer connections
       for (const [, pc] of speakerPeerConnsRef.current) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
       }
       speakerPeerConnsRef.current.clear();
       return;
@@ -417,10 +430,12 @@ function App() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
       localMicStreamRef.current = stream;
+      isMicOnRef.current = true;
       setIsMicOn(true);
       socket?.emit('start-audio');
     } catch (e) {
       addToast('Mic permission denied or unavailable.', 'error');
+      isMicOnRef.current = false;
       setIsMicOn(false);
       localMicStreamRef.current = null;
     }
@@ -429,16 +444,16 @@ function App() {
   // Camera: start/stop
   async function toggleCamera() {
     if (isCamOn) {
-      try { localCamStreamRef.current?.getTracks()?.forEach(t => t.stop()); } catch {}
+      try { localCamStreamRef.current?.getTracks()?.forEach(t => t.stop()); } catch { }
       localCamStreamRef.current = null;
       setIsCamOn(false);
-      try { socket?.emit('stop-video'); } catch {}
+      try { socket?.emit('stop-video'); } catch { }
       for (const [, pc] of videoBroadcasterPCsRef.current) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
       }
       videoBroadcasterPCsRef.current.clear();
       // remove self preview
-      try { videoViewerStreamsRef.current.delete(user?.id); } catch {}
+      try { videoViewerStreamsRef.current.delete(user?.id); } catch { }
       removeVideoTile(user?.id);
       if (fullScreenVideoId === user?.id) setFullScreenVideoId(null);
       return;
@@ -465,13 +480,13 @@ function App() {
   function endAllMedia() {
     try {
       if (isMicOn) toggleMic();
-    } catch {}
+    } catch { }
     try {
       if (isCamOn) toggleCamera();
-    } catch {}
+    } catch { }
     try {
       if (isSharingScreen) toggleScreenShare();
-    } catch {}
+    } catch { }
   }
 
   // Fetch account profile when token exists (name, avatar)
@@ -603,7 +618,7 @@ function App() {
       // As viewer: close connection and show placeholder
       const pc = viewerPeerConnsRef.current.get(sharerId);
       if (pc) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         viewerPeerConnsRef.current.delete(sharerId);
       }
       updateScreenTile(sharerId, { ended: true });
@@ -613,13 +628,13 @@ function App() {
       // I am sharer, viewer requests subscription
       if (!isSharingScreen || !localScreenStreamRef.current) return;
       if (sharerPeerConnsRef.current.has(from)) {
-        try { sharerPeerConnsRef.current.get(from).close(); } catch {}
+        try { sharerPeerConnsRef.current.get(from).close(); } catch { }
         sharerPeerConnsRef.current.delete(from);
       }
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       sharerPeerConnsRef.current.set(from, pc);
       for (const track of localScreenStreamRef.current.getTracks()) {
-        try { track.contentHint = 'detail'; } catch {}
+        try { track.contentHint = 'detail'; } catch { }
         pc.addTrack(track, localScreenStreamRef.current);
       }
       try {
@@ -628,25 +643,25 @@ function App() {
           if (sender.track && sender.track.kind === 'video') {
             const p = sender.getParameters();
             p.encodings = [{ maxBitrate: 1_500_000, scaleResolutionDownBy: 1 }];
-            try { await sender.setParameters(p); } catch {}
+            try { await sender.setParameters(p); } catch { }
           }
         }
-      } catch {}
+      } catch { }
       pc.onicecandidate = (ev) => {
-        if (ev.candidate) socket.emit('webrtc-ice-candidate', { to: from, candidate: ev.candidate });
+        if (ev.candidate) socket.emit('webrtc-ice-candidate', { to: from, candidate: ev.candidate, isSharer: true });
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
-          try { pc.close(); } catch {}
+          try { pc.close(); } catch { }
           sharerPeerConnsRef.current.delete(from);
         }
       };
       try {
         const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
         await pc.setLocalDescription(offer);
-        socket.emit('webrtc-offer', { to: from, sdp: pc.localDescription });
+        socket.emit('webrtc-offer', { to: from, sdp: pc.localDescription, isSharer: true });
       } catch (e) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         sharerPeerConnsRef.current.delete(from);
       }
     };
@@ -654,7 +669,7 @@ function App() {
     const onUnsubscribe = ({ from }) => {
       const pc = sharerPeerConnsRef.current.get(from);
       if (pc) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         sharerPeerConnsRef.current.delete(from);
       }
     };
@@ -663,13 +678,13 @@ function App() {
       // I am viewer receiving offer from sharer
       let pc = viewerPeerConnsRef.current.get(from);
       if (pc) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         viewerPeerConnsRef.current.delete(from);
       }
       pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       viewerPeerConnsRef.current.set(from, pc);
       pc.onicecandidate = (ev) => {
-        if (ev.candidate) socket.emit('webrtc-ice-candidate', { to: from, candidate: ev.candidate });
+        if (ev.candidate) socket.emit('webrtc-ice-candidate', { to: from, candidate: ev.candidate, isSharer: false });
       };
       pc.ontrack = (ev) => {
         const [stream] = ev.streams;
@@ -679,13 +694,13 @@ function App() {
         const tryAttach = () => {
           const videoEl = document.getElementById(`screen-video-${from}`);
           if (videoEl && videoEl instanceof HTMLVideoElement) {
-            try { videoEl.srcObject = stream; } catch {}
+            try { videoEl.srcObject = stream; } catch { }
             // auto-open full-screen on first frame if not already
             if (!fullScreenSharerId) {
               setFullScreenSharerId(from);
             }
             // notify server I'm watching
-            try { socket.emit('viewer-started-watching', { sharerId: from }); } catch {}
+            try { socket.emit('viewer-started-watching', { sharerId: from }); } catch { }
             return true;
           }
           return false;
@@ -696,7 +711,7 @@ function App() {
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-          try { pc.close(); } catch {}
+          try { pc.close(); } catch { }
           viewerPeerConnsRef.current.delete(from);
         }
       };
@@ -704,9 +719,9 @@ function App() {
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        socket.emit('webrtc-answer', { to: from, sdp: pc.localDescription });
+        socket.emit('webrtc-answer', { to: from, sdp: pc.localDescription, isSharer: false });
       } catch (e) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         viewerPeerConnsRef.current.delete(from);
       }
     };
@@ -715,14 +730,13 @@ function App() {
       // I am sharer receiving viewer's answer
       const pc = sharerPeerConnsRef.current.get(from);
       if (!pc) return;
-      try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch {}
+      try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch { }
     };
 
-    const onIce = async ({ from, candidate }) => {
-      let pc = sharerPeerConnsRef.current.get(from);
-      if (!pc) pc = viewerPeerConnsRef.current.get(from);
+    const onIce = async ({ from, candidate, isSharer }) => {
+      let pc = isSharer ? viewerPeerConnsRef.current.get(from) : sharerPeerConnsRef.current.get(from);
       if (!pc) return;
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch { }
     };
 
     socket.on('screenshare-active', onActive);
@@ -761,48 +775,54 @@ function App() {
     };
     const onStarted = ({ speakerId }) => {
       setActiveSpeakerIds(prev => Array.from(new Set([...prev, speakerId])));
+      // Never subscribe to our own audio (prevents hearing ourselves / echo)
+      if (speakerId === socket.id) return;
+      // Subscribe immediately so unmute has no delay; server enforces proximity
+      try { pendingAudioSubscribeRef.current?.add(speakerId); } catch { }
+      try { socket.emit('audio-subscribe', { speakerId }); } catch { }
     };
     const onStopped = ({ speakerId }) => {
       setActiveSpeakerIds(prev => prev.filter(id => id !== speakerId));
+      try { pendingAudioSubscribeRef.current?.delete(speakerId); } catch { }
       const pc = listenerPeerConnsRef.current.get(speakerId);
       if (pc) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         listenerPeerConnsRef.current.delete(speakerId);
       }
       const el = document.getElementById(`prox-audio-${speakerId}`);
       if (el && el.parentElement) {
-        try { el.srcObject = null; el.remove(); } catch {}
+        try { el.srcObject = null; el.remove(); } catch { }
       }
     };
 
     const onSubscribe = async ({ from }) => {
-      // I am speaker, listener requests subscription
-      if (!isMicOn || !localMicStreamRef.current) return;
+      // I am speaker, listener requests subscription. Use ref so we see current mic state after mute/unmute (handler closure can be stale).
+      if (!isMicOnRef.current || !localMicStreamRef.current) return;
       if (speakerPeerConnsRef.current.has(from)) {
-        try { speakerPeerConnsRef.current.get(from).close(); } catch {}
+        try { speakerPeerConnsRef.current.get(from).close(); } catch { }
         speakerPeerConnsRef.current.delete(from);
       }
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       speakerPeerConnsRef.current.set(from, pc);
       for (const track of localMicStreamRef.current.getTracks()) {
-        try { track.contentHint = 'speech'; } catch {}
+        try { track.contentHint = 'speech'; } catch { }
         pc.addTrack(track, localMicStreamRef.current);
       }
       pc.onicecandidate = (ev) => {
-        if (ev.candidate) socket.emit('audio-ice-candidate', { to: from, candidate: ev.candidate });
+        if (ev.candidate) socket.emit('audio-ice-candidate', { to: from, candidate: ev.candidate, isSpeaker: true });
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-          try { pc.close(); } catch {}
+          try { pc.close(); } catch { }
           speakerPeerConnsRef.current.delete(from);
         }
       };
       try {
         const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
         await pc.setLocalDescription(offer);
-        socket.emit('audio-webrtc-offer', { to: from, sdp: pc.localDescription });
+        socket.emit('audio-webrtc-offer', { to: from, sdp: pc.localDescription, isSpeaker: true });
       } catch (e) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         speakerPeerConnsRef.current.delete(from);
       }
     };
@@ -810,12 +830,16 @@ function App() {
     const onUnsubscribe = ({ from }) => {
       const pc = speakerPeerConnsRef.current.get(from);
       if (pc) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         speakerPeerConnsRef.current.delete(from);
       }
     };
 
     const onOffer = async ({ from, sdp }) => {
+      try {
+        pendingAudioSubscribeRef.current?.delete(from);
+        pendingAudioSubscribeTimeRef.current?.delete(from);
+      } catch { }
       if (listenerPeerConnsRef.current.size >= 32 && !listenerPeerConnsRef.current.has(from)) {
         // soft cap to keep UI and audio stable
         return;
@@ -823,13 +847,13 @@ function App() {
       // I am listener receiving offer from speaker
       let pc = listenerPeerConnsRef.current.get(from);
       if (pc) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         listenerPeerConnsRef.current.delete(from);
       }
       pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       listenerPeerConnsRef.current.set(from, pc);
       pc.onicecandidate = (ev) => {
-        if (ev.candidate) socket.emit('audio-ice-candidate', { to: from, candidate: ev.candidate });
+        if (ev.candidate) socket.emit('audio-ice-candidate', { to: from, candidate: ev.candidate, isSpeaker: false });
       };
       pc.ontrack = (ev) => {
         const [stream] = ev.streams;
@@ -844,11 +868,11 @@ function App() {
           el.style.display = 'none';
           document.body.appendChild(el);
         }
-        try { el.srcObject = stream; el.play?.().catch(() => {}); } catch {}
+        try { el.srcObject = stream; el.play?.().catch(() => { }); } catch { }
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-          try { pc.close(); } catch {}
+          try { pc.close(); } catch { }
           listenerPeerConnsRef.current.delete(from);
         }
       };
@@ -856,9 +880,9 @@ function App() {
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        socket.emit('audio-webrtc-answer', { to: from, sdp: pc.localDescription });
+        socket.emit('audio-webrtc-answer', { to: from, sdp: pc.localDescription, isSpeaker: false });
       } catch (e) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         listenerPeerConnsRef.current.delete(from);
       }
     };
@@ -866,14 +890,14 @@ function App() {
     const onAnswer = async ({ from, sdp }) => {
       const pc = speakerPeerConnsRef.current.get(from);
       if (!pc) return;
-      try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch {}
+      try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch { }
     };
 
-    const onIce = async ({ from, candidate }) => {
-      let pc = speakerPeerConnsRef.current.get(from);
-      if (!pc) pc = listenerPeerConnsRef.current.get(from);
+    const onIce = async ({ from, candidate, isSpeaker }) => {
+      // If the other side is the speaker, it's our listener PC that needs the candidate (and vice versa)
+      let pc = isSpeaker ? listenerPeerConnsRef.current.get(from) : speakerPeerConnsRef.current.get(from);
       if (!pc) return;
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch { }
     };
 
     socket.on('audio-active', onActive);
@@ -910,10 +934,10 @@ function App() {
     const onStopped = ({ broadcasterId }) => {
       setActiveBroadcasterIds(prev => prev.filter(id => id !== broadcasterId));
       const pc = videoViewerPCsRef.current.get(broadcasterId);
-      if (pc) { try { pc.close(); } catch {} videoViewerPCsRef.current.delete(broadcasterId); }
+      if (pc) { try { pc.close(); } catch { } videoViewerPCsRef.current.delete(broadcasterId); }
       const el = document.getElementById(`prox-video-${broadcasterId}`);
       if (el && el.parentElement) {
-        try { el.srcObject = null; el.remove(); } catch {}
+        try { el.srcObject = null; el.remove(); } catch { }
       }
     };
 
@@ -921,35 +945,35 @@ function App() {
       // I am broadcaster, viewer requests subscription
       if (!isCamOn || !localCamStreamRef.current) return;
       if (videoBroadcasterPCsRef.current.has(from)) {
-        try { videoBroadcasterPCsRef.current.get(from).close(); } catch {}
+        try { videoBroadcasterPCsRef.current.get(from).close(); } catch { }
         videoBroadcasterPCsRef.current.delete(from);
       }
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       videoBroadcasterPCsRef.current.set(from, pc);
       for (const track of localCamStreamRef.current.getTracks()) {
-        try { track.contentHint = track.kind === 'video' ? 'motion' : undefined; } catch {}
+        try { track.contentHint = track.kind === 'video' ? 'motion' : undefined; } catch { }
         pc.addTrack(track, localCamStreamRef.current);
       }
-      pc.onicecandidate = (ev) => { if (ev.candidate) socket.emit('video-ice-candidate', { to: from, candidate: ev.candidate }); };
+      pc.onicecandidate = (ev) => { if (ev.candidate) socket.emit('video-ice-candidate', { to: from, candidate: ev.candidate, isBroadcaster: true }); };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-          try { pc.close(); } catch {}
+          try { pc.close(); } catch { }
           videoBroadcasterPCsRef.current.delete(from);
         }
       };
       try {
         const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
         await pc.setLocalDescription(offer);
-        socket.emit('video-webrtc-offer', { to: from, sdp: pc.localDescription });
+        socket.emit('video-webrtc-offer', { to: from, sdp: pc.localDescription, isBroadcaster: true });
       } catch (e) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         videoBroadcasterPCsRef.current.delete(from);
       }
     };
 
     const onUnsubscribe = ({ from }) => {
       const pc = videoBroadcasterPCsRef.current.get(from);
-      if (pc) { try { pc.close(); } catch {} videoBroadcasterPCsRef.current.delete(from); }
+      if (pc) { try { pc.close(); } catch { } videoBroadcasterPCsRef.current.delete(from); }
     };
 
     const onOffer = async ({ from, sdp }) => {
@@ -958,10 +982,10 @@ function App() {
         return;
       }
       let pc = videoViewerPCsRef.current.get(from);
-      if (pc) { try { pc.close(); } catch {} videoViewerPCsRef.current.delete(from); }
+      if (pc) { try { pc.close(); } catch { } videoViewerPCsRef.current.delete(from); }
       pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       videoViewerPCsRef.current.set(from, pc);
-      pc.onicecandidate = (ev) => { if (ev.candidate) socket.emit('video-ice-candidate', { to: from, candidate: ev.candidate }); };
+      pc.onicecandidate = (ev) => { if (ev.candidate) socket.emit('video-ice-candidate', { to: from, candidate: ev.candidate, isBroadcaster: false }); };
       pc.ontrack = (ev) => {
         const [stream] = ev.streams;
         videoViewerStreamsRef.current.set(from, stream);
@@ -969,7 +993,7 @@ function App() {
         const tryAttach = () => {
           const el = document.getElementById(`video-inline-${from}`);
           if (el && el instanceof HTMLVideoElement) {
-            try { el.srcObject = stream; el.play?.().catch(() => {}); } catch {}
+            try { el.srcObject = stream; el.play?.().catch(() => { }); } catch { }
             if (!fullScreenVideoId) setFullScreenVideoId(from);
             return true;
           }
@@ -979,7 +1003,7 @@ function App() {
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
-          try { pc.close(); } catch {}
+          try { pc.close(); } catch { }
           videoViewerPCsRef.current.delete(from);
         }
       };
@@ -987,9 +1011,9 @@ function App() {
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        socket.emit('video-webrtc-answer', { to: from, sdp: pc.localDescription });
+        socket.emit('video-webrtc-answer', { to: from, sdp: pc.localDescription, isBroadcaster: false });
       } catch (e) {
-        try { pc.close(); } catch {}
+        try { pc.close(); } catch { }
         videoViewerPCsRef.current.delete(from);
       }
     };
@@ -997,14 +1021,13 @@ function App() {
     const onAnswer = async ({ from, sdp }) => {
       const pc = videoBroadcasterPCsRef.current.get(from);
       if (!pc) return;
-      try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch {}
+      try { await pc.setRemoteDescription(new RTCSessionDescription(sdp)); } catch { }
     };
 
-    const onIce = async ({ from, candidate }) => {
-      let pc = videoBroadcasterPCsRef.current.get(from);
-      if (!pc) pc = videoViewerPCsRef.current.get(from);
+    const onIce = async ({ from, candidate, isBroadcaster }) => {
+      let pc = isBroadcaster ? videoViewerPCsRef.current.get(from) : videoBroadcasterPCsRef.current.get(from);
       if (!pc) return;
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch { }
     };
 
     socket.on('video-active', onActive);
@@ -1045,10 +1068,10 @@ function App() {
       if (!eligibleSharerIds.includes(sharerId)) {
         socket.emit('screenshare-unsubscribe', { sharerId });
         const pc = viewerPeerConnsRef.current.get(sharerId);
-        if (pc) { try { pc.close(); } catch {} }
+        if (pc) { try { pc.close(); } catch { } }
         viewerPeerConnsRef.current.delete(sharerId);
         removeScreenTile(sharerId);
-        try { socket.emit('viewer-stopped-watching', { sharerId }); } catch {}
+        try { socket.emit('viewer-stopped-watching', { sharerId }); } catch { }
         if (fullScreenSharerId === sharerId) {
           // if current full-screen left range, switch to another eligible or exit
           const next = eligibleSharerIds.find(id => id !== sharerId) || null;
@@ -1058,15 +1081,19 @@ function App() {
     }
   }, [eligibleSharerIds, socket, user, users]);
 
-  // Proximity-based auto subscribe/unsubscribe for mic
+  // Proximity-based auto subscribe/unsubscribe for mic.
+  // Room stays active for others when one person leaves (we only unsubscribe that peer).
+  // Room ends only when one person is left in the area (auto stop mic below).
   useEffect(() => {
     if (!socket || !user) return;
     const set = new Set(activeSpeakerIds);
     const subscribed = new Set(Array.from(listenerPeerConnsRef.current.keys()));
 
-    // Determine which speakers are within radius
+    // Determine which speakers are within radius (exclude self to prevent echo)
+    const myId = user.id || socket?.id;
     const eligible = [];
     for (const speakerId of set) {
+      if (speakerId === myId) continue;
       const u = users.find(x => x.id === speakerId && x.room === user.room);
       if (!u) continue;
       const dx = (u.position?.x || 0) - (user.position?.x || 0);
@@ -1075,23 +1102,60 @@ function App() {
       if (d <= PROXIMITY_RADIUS) eligible.push(speakerId);
     }
 
-    // Subscribe to new eligible speakers
+    // Track that we were in a group (2+ in proximity) for auto-stop when alone
+    if (nearbyUsers.length >= 1) hadNearbyUsersForAudioRef.current = true;
+
+    // Pending is only cleared in onOffer (when we get the stream), onStopped, when we unsubscribe below, or after retry timeout.
+    const pendingSet = pendingAudioSubscribeRef?.current;
+    const pendingTimeMap = pendingAudioSubscribeTimeRef?.current;
+    const now = Date.now();
+
+    // Subscribe to new eligible speakers (re-enter room → auto subscribe). Retry if we've been pending too long with no offer.
     for (const speakerId of eligible) {
-      if (!subscribed.has(speakerId)) {
-        try { socket.emit('audio-subscribe', { speakerId }); } catch {}
+      if (subscribed.has(speakerId)) continue;
+      const wasPending = pendingSet?.has(speakerId);
+      const pendingAt = pendingTimeMap?.get(speakerId);
+      if (wasPending && pendingAt != null && now - pendingAt > PENDING_AUDIO_RETRY_MS) {
+        try { pendingSet?.delete(speakerId); pendingTimeMap?.delete(speakerId); } catch { }
       }
+      if (pendingSet?.has(speakerId)) continue;
+      try { socket.emit('audio-subscribe', { speakerId }); } catch { }
+      try { pendingSet?.add(speakerId); pendingTimeMap?.set(speakerId, now); } catch { }
     }
 
-    // Unsubscribe from those no longer eligible
+    // Unsubscribe only when they leave range; don't stop the room for others
     for (const speakerId of subscribed) {
       if (!eligible.includes(speakerId)) {
-        try { socket.emit('audio-unsubscribe', { speakerId }); } catch {}
+        try { pendingSet?.delete(speakerId); pendingTimeMap?.delete(speakerId); } catch { }
+        try { socket.emit('audio-unsubscribe', { speakerId }); } catch { }
         const pc = listenerPeerConnsRef.current.get(speakerId);
-        if (pc) { try { pc.close(); } catch {} }
+        if (pc) { try { pc.close(); } catch { } }
         listenerPeerConnsRef.current.delete(speakerId);
       }
     }
-  }, [socket, activeSpeakerIds, users, user]);
+
+    // When only one person left in the area, stop the room (auto stop mic)
+    if (isMicOn && nearbyUsers.length === 0 && hadNearbyUsersForAudioRef.current) {
+      hadNearbyUsersForAudioRef.current = false;
+      try { localMicStreamRef.current?.getTracks()?.forEach(t => t.stop()); } catch { }
+      localMicStreamRef.current = null;
+      isMicOnRef.current = false;
+      setIsMicOn(false);
+      try { socket.emit('stop-audio'); } catch { }
+      for (const [, pc] of speakerPeerConnsRef.current) {
+        try { pc.close(); } catch { }
+      }
+      speakerPeerConnsRef.current.clear();
+      addToast('Voice call ended (no one nearby).', 'info');
+    }
+  }, [socket, activeSpeakerIds, users, user, nearbyUsers, isMicOn, audioRetryTick]);
+
+  // Run proximity audio logic periodically so we can retry pending subscriptions when offer never arrives
+  useEffect(() => {
+    if (!socket || !user) return;
+    const id = setInterval(() => setAudioRetryTick((t) => t + 1), 3000);
+    return () => clearInterval(id);
+  }, [socket, user]);
 
   // Proximity-based auto subscribe/unsubscribe for camera (with cap)
   useEffect(() => {
@@ -1123,19 +1187,19 @@ function App() {
 
     for (const broadcasterId of eligible) {
       if (!subscribed.has(broadcasterId) && prioritized.includes(broadcasterId)) {
-        try { socket.emit('video-subscribe', { broadcasterId }); } catch {}
+        try { socket.emit('video-subscribe', { broadcasterId }); } catch { }
       }
     }
 
     for (const broadcasterId of subscribed) {
       if (!prioritized.includes(broadcasterId)) {
-        try { socket.emit('video-unsubscribe', { broadcasterId }); } catch {}
+        try { socket.emit('video-unsubscribe', { broadcasterId }); } catch { }
         const pc = videoViewerPCsRef.current.get(broadcasterId);
-        if (pc) { try { pc.close(); } catch {} }
+        if (pc) { try { pc.close(); } catch { } }
         videoViewerPCsRef.current.delete(broadcasterId);
         const el = document.getElementById(`prox-video-${broadcasterId}`);
         if (el && el.parentElement) {
-          try { el.srcObject = null; el.remove(); } catch {}
+          try { el.srcObject = null; el.remove(); } catch { }
         }
       }
     }
@@ -1338,11 +1402,18 @@ function App() {
   // LiveKit group voice (not used for proximity mic now) — placeholder if needed later
 
   const sendWave = (toSocketId) => {
-    try { socket?.emit('wave-send', { to: toSocketId }); } catch {}
+    try { socket?.emit('wave-send', { to: toSocketId }); } catch { }
     addToast('👋 Wave sent!', 'info');
   };
 
   const handleRoomChange = (newRoom) => {
+    // Ensure user is muted and media is stopped when changing rooms
+    try {
+      endAllMedia();
+    } catch (err) {
+      console.error('Failed to end media on room change:', err);
+    }
+
     setCurrentRoom(newRoom);
     if (user && socket) {
       const newPosition = { x: 15, y: 12 }; // Adjusted for 30x25 grid
@@ -1539,7 +1610,7 @@ function App() {
               <button
                 className="user-menu-item danger"
                 onClick={() => {
-                  try { socket?.disconnect(); } catch {}
+                  try { socket?.disconnect(); } catch { }
                   localStorage.removeItem('token');
                   localStorage.removeItem('user_name');
                   localStorage.removeItem('user_avatar');
@@ -1562,7 +1633,7 @@ function App() {
       >
         {/* Characters are now rendered inside the zoomable OfficeGrid */}
         {user && (
-          <Character 
+          <Character
             user={user}
             onMove={handleMove}
             isCurrentUser={true}
@@ -1573,22 +1644,22 @@ function App() {
             isWalking={isWalking}
           />
         )}
-        
+
         {users
           .filter(u => u.room === currentRoom)
           .map(user => (
-            <Character 
+            <Character
               key={user.id}
               user={user}
-              onMove={() => {}}
+              onMove={() => { }}
               isCurrentUser={false}
               isSharingActive={activeSharerIds.includes(user.id)}
               onClick={() => setProfileModalUserId(user.id)}
             />
           ))}
       </OfficeGrid>
-      
-      <Controls 
+
+      <Controls
         onJoinOffice={handleJoinOffice}
         onRoomChange={handleRoomChange}
         currentRoom={currentRoom}
@@ -1598,7 +1669,7 @@ function App() {
         onToggle={() => setShowControls((v) => !v)}
       />
 
-      <RoomInfo 
+      <RoomInfo
         currentRoom={currentRoom}
         userCount={users.length + (user ? 1 : 0)}
         isConnected={isConnected}
@@ -1607,7 +1678,7 @@ function App() {
       {/* Nearby users top bar with scroll */}
       {user && (nearbyUsers.length > 0 || (isSharingScreen && minimizedSharerIds.includes(user.id)) || (isCamOn && videoMinimizedIds.includes(user.id))) && !fullScreenSharerId && !fullScreenVideoId && (
         <div style={{ position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 8, padding: 8, borderRadius: 12, background: 'rgba(17,17,17,0.6)', backdropFilter: 'blur(6px)', zIndex: 12500, boxShadow: '0 10px 28px rgba(0,0,0,0.35)' }}>
-          <button title="Scroll left" aria-label="Scroll left" onClick={() => { try { document.getElementById('nearby-scroll')?.scrollBy({ left: -320, behavior: 'smooth' }); } catch {} }} style={{ border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, width: 28, height: 62, cursor: 'pointer' }}>‹</button>
+          <button title="Scroll left" aria-label="Scroll left" onClick={() => { try { document.getElementById('nearby-scroll')?.scrollBy({ left: -320, behavior: 'smooth' }); } catch { } }} style={{ border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, width: 28, height: 62, cursor: 'pointer' }}>‹</button>
           <div id="nearby-scroll" style={{ overflowX: 'auto', overflowY: 'hidden', display: 'grid', gridAutoFlow: 'column', gap: 14, padding: '2px 4px', maxWidth: 'min(92vw, 1200px)' }}>
             {[...(((isSharingScreen && minimizedSharerIds.includes(user.id)) || (isCamOn && videoMinimizedIds.includes(user.id))) ? [{ ...user }] : []), ...nearbyUsers].map((u) => {
               const isScreenSelected = activeSharerIds.includes(u.id);
@@ -1620,9 +1691,9 @@ function App() {
                   {(isMinimizedScreenHere || isMinimizedVideoHere || (u.id === user?.id && ((isSharingScreen && minimizedSharerIds.includes(user.id)) || (isCamOn && videoMinimizedIds.includes(user.id))))) ? (
                     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                       {isMinimizedVideoHere || (u.id === user?.id && isCamOn && videoMinimizedIds.includes(user.id)) ? (
-                        <video id={`video-inline-card-${u.id}`} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000', borderRadius: 8 }} ref={(el) => { const stream = videoViewerStreamsRef.current.get(u.id); const selfStream = (u.id === user?.id) ? localCamStreamRef.current : null; const target = stream || selfStream; if (el && target && el.srcObject !== target) { try { el.srcObject = target; } catch {} } }} />
+                        <video id={`video-inline-card-${u.id}`} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000', borderRadius: 8 }} ref={(el) => { const stream = videoViewerStreamsRef.current.get(u.id); const selfStream = (u.id === user?.id) ? localCamStreamRef.current : null; const target = stream || selfStream; if (el && target && el.srcObject !== target) { try { el.srcObject = target; } catch { } } }} />
                       ) : (
-                        <video id={`screen-video-inline-${u.id}`} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', borderRadius: 8 }} ref={(el) => { const stream = viewerStreamsRef.current.get(u.id); const selfStream = (u.id === user?.id) ? localScreenStreamRef.current : null; const target = stream || selfStream; if (el && target && el.srcObject !== target) { try { el.srcObject = target; } catch {} } }} />
+                        <video id={`screen-video-inline-${u.id}`} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', borderRadius: 8 }} ref={(el) => { const stream = viewerStreamsRef.current.get(u.id); const selfStream = (u.id === user?.id) ? localScreenStreamRef.current : null; const target = stream || selfStream; if (el && target && el.srcObject !== target) { try { el.srcObject = target; } catch { } } }} />
                       )}
                       <div style={{ position: 'absolute', left: 8, bottom: 8, right: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1634,7 +1705,7 @@ function App() {
                         </div>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button title="Maximize" onClick={(e) => { e.stopPropagation(); const useVideo = isMinimizedVideoHere || (u.id === user?.id && isCamOn && videoMinimizedIds.includes(user.id)); if (useVideo) { setFullScreenVideoId(u.id); removeMinimizedVideo(u.id); } else { setFullScreenSharerId(u.id); removeMinimizedSharer(u.id); } }} style={{ border: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', borderRadius: 6, height: 22, padding: '0 6px', cursor: 'pointer' }}>⤢</button>
-                          <button title="Close" onClick={(e) => { e.stopPropagation(); const useVideo = isMinimizedVideoHere || (u.id === user?.id && isCamOn && videoMinimizedIds.includes(user.id)); if (useVideo) { try { socket?.emit('video-unsubscribe', { broadcasterId: u.id }); } catch {} const pc = videoViewerPCsRef.current.get(u.id); if (pc) { try { pc.close(); } catch {} } videoViewerPCsRef.current.delete(u.id); removeVideoTile(u.id); removeMinimizedVideo(u.id); } else { try { socket?.emit('screenshare-unsubscribe', { sharerId: u.id }); } catch {} const pc = viewerPeerConnsRef.current.get(u.id); if (pc) { try { pc.close(); } catch {} } viewerPeerConnsRef.current.delete(u.id); removeScreenTile(u.id); try { socket?.emit('viewer-stopped-watching', { sharerId: u.id }); } catch {} removeMinimizedSharer(u.id); } }} style={{ border: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', borderRadius: 6, height: 22, padding: '0 6px', cursor: 'pointer' }}>×</button>
+                          <button title="Close" onClick={(e) => { e.stopPropagation(); const useVideo = isMinimizedVideoHere || (u.id === user?.id && isCamOn && videoMinimizedIds.includes(user.id)); if (useVideo) { try { socket?.emit('video-unsubscribe', { broadcasterId: u.id }); } catch { } const pc = videoViewerPCsRef.current.get(u.id); if (pc) { try { pc.close(); } catch { } } videoViewerPCsRef.current.delete(u.id); removeVideoTile(u.id); removeMinimizedVideo(u.id); } else { try { socket?.emit('screenshare-unsubscribe', { sharerId: u.id }); } catch { } const pc = viewerPeerConnsRef.current.get(u.id); if (pc) { try { pc.close(); } catch { } } viewerPeerConnsRef.current.delete(u.id); removeScreenTile(u.id); try { socket?.emit('viewer-stopped-watching', { sharerId: u.id }); } catch { } removeMinimizedSharer(u.id); } }} style={{ border: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', borderRadius: 6, height: 22, padding: '0 6px', cursor: 'pointer' }}>×</button>
                         </div>
                       </div>
                     </div>
@@ -1654,7 +1725,7 @@ function App() {
               );
             })}
           </div>
-          <button title="Scroll right" aria-label="Scroll right" onClick={() => { try { document.getElementById('nearby-scroll')?.scrollBy({ left: 320, behavior: 'smooth' }); } catch {} }} style={{ border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, width: 28, height: 62, cursor: 'pointer' }}>›</button>
+          <button title="Scroll right" aria-label="Scroll right" onClick={() => { try { document.getElementById('nearby-scroll')?.scrollBy({ left: 320, behavior: 'smooth' }); } catch { } }} style={{ border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, width: 28, height: 62, cursor: 'pointer' }}>›</button>
         </div>
       )}
 
@@ -1684,7 +1755,7 @@ function App() {
                   </div>
                   <button onClick={() => setProfileModalUserId(null)} title="Close" style={{ border: '1px solid rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.06)', color: '#fff', borderRadius: 8, width: 32, height: 32, cursor: 'pointer' }}>×</button>
                 </div>
-              <div style={{ padding: 14 }}>
+                <div style={{ padding: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <span style={{ fontSize: 12, color: '#9CA3AF' }}>Status:</span>
                     {(() => {
@@ -1719,7 +1790,7 @@ function App() {
                           setIsChatOpen(true);
                           setProfileModalUserId(null);
                           // expose to notification click handler as well
-                          try { window.__openDm = (uid) => { setIsChatOpen(true); setDmPeerId(uid); loadDmHistory(uid); }; } catch {}
+                          try { window.__openDm = (uid) => { setIsChatOpen(true); setDmPeerId(uid); loadDmHistory(uid); }; } catch { }
                         }
                       }}
                       style={{ border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.12)', color: '#E5E7EB', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', fontWeight: 800 }}
@@ -1733,7 +1804,7 @@ function App() {
       )}
 
       {user && isChatOpen && (
-        <ChatPanel 
+        <ChatPanel
           messages={dmMessages[dmPeerId] || []}
           onSendMessage={handleSendMessage}
           currentUser={user}
@@ -1771,16 +1842,16 @@ function App() {
           >
             {isMicOn ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 14a4 4 0 0 0 4-4V7a4 4 0 1 0-8 0v3a4 4 0 0 0 4 4Z" stroke="currentColor" strokeWidth="2"/>
-                <path d="M19 11a7 7 0 0 1-14 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                <path d="M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                <path d="M12 14a4 4 0 0 0 4-4V7a4 4 0 1 0-8 0v3a4 4 0 0 0 4 4Z" stroke="currentColor" strokeWidth="2" />
+                <path d="M19 11a7 7 0 0 1-14 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             ) : (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M9 10V7a3 3 0 1 1 6 0v3a3 3 0 0 1-3 3" stroke="currentColor" strokeWidth="2"/>
-                <path d="M19 11a7 7 0 0 1-3.1 5.78M8.1 16.78A7 7 0 0 1 5 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                <path d="M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                <path d="m4 4 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                <path d="M9 10V7a3 3 0 1 1 6 0v3a3 3 0 0 1-3 3" stroke="currentColor" strokeWidth="2" />
+                <path d="M19 11a7 7 0 0 1-3.1 5.78M8.1 16.78A7 7 0 0 1 5 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="m4 4 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             )}
           </button>
@@ -1792,14 +1863,14 @@ function App() {
           >
             {isCamOn ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="3" y="6" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="2"/>
-                <path d="M21 8v8l-4-3-2-1 2-1 4-3Z" fill="currentColor"/>
+                <rect x="3" y="6" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
+                <path d="M21 8v8l-4-3-2-1 2-1 4-3Z" fill="currentColor" />
               </svg>
             ) : (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="3" y="6" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="2"/>
-                <path d="M21 8v8l-4-3-2-1 2-1 4-3Z" fill="currentColor"/>
-                <path d="m4 4 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                <rect x="3" y="6" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
+                <path d="M21 8v8l-4-3-2-1 2-1 4-3Z" fill="currentColor" />
+                <path d="m4 4 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             )}
           </button>
@@ -1811,15 +1882,15 @@ function App() {
           >
             {isSharingScreen ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2"/>
-                <path d="M12 20v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                <path d="M9 10l3-3 3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
+                <path d="M12 20v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M9 10l3-3 3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             ) : (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2"/>
-                <path d="M12 20v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                <path d="M12 8l-3 3m3-3 3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
+                <path d="M12 20v-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M12 8l-3 3m3-3 3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}
           </button>
@@ -1830,7 +1901,7 @@ function App() {
             onClick={endAllMedia}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M6.5 15.5c2.3-1.5 8.7-1.5 11 0 1 .6 2.5-.2 2.5-1.4v-2c0-.6-.4-1.2-1-1.4-4-1.5-10-1.5-14 0-.6.2-1 .8-1 1.4v2c0 1.2 1.5 2 2.5 1.4Z" fill="currentColor"/>
+              <path d="M6.5 15.5c2.3-1.5 8.7-1.5 11 0 1 .6 2.5-.2 2.5-1.4v-2c0-.6-.4-1.2-1-1.4-4-1.5-10-1.5-14 0-.6.2-1 .8-1 1.4v2c0 1.2 1.5 2 2.5 1.4Z" fill="currentColor" />
             </svg>
           </button>
         </div>
@@ -1902,12 +1973,12 @@ function App() {
                     title="Close"
                     onClick={() => {
                       // As viewer: unsubscribe and close
-                      try { socket?.emit('screenshare-unsubscribe', { sharerId }); } catch {}
+                      try { socket?.emit('screenshare-unsubscribe', { sharerId }); } catch { }
                       const pc = viewerPeerConnsRef.current.get(sharerId);
-                      if (pc) { try { pc.close(); } catch {} }
+                      if (pc) { try { pc.close(); } catch { } }
                       viewerPeerConnsRef.current.delete(sharerId);
                       removeScreenTile(sharerId);
-                      try { socket?.emit('viewer-stopped-watching', { sharerId }); } catch {}
+                      try { socket?.emit('viewer-stopped-watching', { sharerId }); } catch { }
                       removeMinimizedSharer(sharerId);
                     }}
                     style={{ border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', borderRadius: 6, height: 24, padding: '0 8px', cursor: 'pointer' }}
@@ -1929,7 +2000,7 @@ function App() {
                     ref={(el) => {
                       const stream = viewerStreamsRef.current.get(sharerId) || (sharerId === user?.id ? localScreenStreamRef.current : null);
                       if (el && stream && el.srcObject !== stream) {
-                        try { el.srcObject = stream; } catch {}
+                        try { el.srcObject = stream; } catch { }
                       }
                     }}
                   />
@@ -1993,9 +2064,9 @@ function App() {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button title="Maximize" onClick={() => { setFullScreenVideoId(broadcasterId); setVideoMinimizedIds([]); }} style={{ border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', borderRadius: 6, height: 24, padding: '0 8px', cursor: 'pointer' }}>⤢</button>
                   <button title="Close" onClick={() => {
-                    try { socket?.emit('video-unsubscribe', { broadcasterId }); } catch {}
+                    try { socket?.emit('video-unsubscribe', { broadcasterId }); } catch { }
                     const pc = videoViewerPCsRef.current.get(broadcasterId);
-                    if (pc) { try { pc.close(); } catch {} }
+                    if (pc) { try { pc.close(); } catch { } }
                     videoViewerPCsRef.current.delete(broadcasterId);
                     removeVideoTile(broadcasterId);
                     removeMinimizedVideo(broadcasterId);
@@ -2016,7 +2087,7 @@ function App() {
                       ref={(el) => {
                         const stream = videoViewerStreamsRef.current.get(broadcasterId);
                         if (el && stream && el.srcObject !== stream) {
-                          try { el.srcObject = stream; } catch {}
+                          try { el.srcObject = stream; } catch { }
                         }
                       }}
                     />
@@ -2131,7 +2202,7 @@ function App() {
                   muted
                   playsInline
                   className="ss-video fade-in"
-                  ref={(el) => { if (el && stream && el.srcObject !== stream) { try { el.srcObject = stream; } catch {} } }}
+                  ref={(el) => { if (el && stream && el.srcObject !== stream) { try { el.srcObject = stream; } catch { } } }}
                 />
               );
             })()}
@@ -2188,7 +2259,7 @@ function App() {
               const stream = videoViewerStreamsRef.current.get(fullScreenVideoId);
               return (
                 <video id={`video-fs-${fullScreenVideoId}`} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
-                  ref={(el) => { if (el && stream && el.srcObject !== stream) { try { el.srcObject = stream; el.play?.().catch(() => {}); } catch {} } }}
+                  ref={(el) => { if (el && stream && el.srcObject !== stream) { try { el.srcObject = stream; el.play?.().catch(() => { }); } catch { } } }}
                 />
               );
             })()}
