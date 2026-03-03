@@ -389,9 +389,9 @@ io.on('connection', (socket) => {
       presence: userData.presence || 'available'
     });
 
-    // Broadcast to all users in the same room
+    // Broadcast to all users (global presence)
     socket.join(userData.room);
-    io.to(userData.room).emit('user-joined', {
+    io.emit('user-joined', {
       id: socket.id,
       userId: socket.data.userId,
       name,
@@ -401,9 +401,9 @@ io.on('connection', (socket) => {
       presence: userData.presence || 'available'
     });
 
-    // Send current users in the room to the new user
-    const roomUsers = Array.from(connectedUsers.values()).filter(user => user.room === userData.room);
-    socket.emit('room-users', roomUsers);
+    // Send ALL online users to the new user
+    const allOnlineUsers = Array.from(connectedUsers.values());
+    socket.emit('online-users', allOnlineUsers);
 
     // Also send which users are currently sharing screens in this room
     const roomSharers = Array.from(activeScreenSharers.entries())
@@ -449,67 +449,54 @@ io.on('connection', (socket) => {
       if (oldRoom !== data.room) {
         if (oldRoom) {
           socket.leave(oldRoom);
-          io.to(oldRoom).emit('user-left', socket.id);
         }
         socket.join(data.room);
-        io.to(data.room).emit('user-joined', {
-          id: socket.id,
-          userId: user.userId,
-          name: user.name,
-          avatar: user.avatar,
-          position: data.position,
-          room: data.room,
-          presence: user.presence || 'available'
-        });
-        // Send current users in the new room to the switching user
-        const roomUsers = Array.from(connectedUsers.values()).filter(u => u.room === data.room && u.id !== socket.id);
-        socket.emit('room-users', roomUsers);
+      }
 
-        // If this user is currently sharing, update their room and notify both rooms
-        if (activeScreenSharers.has(socket.id)) {
-          // Notify old room that sharing stopped there
-          if (oldRoom) {
-            io.to(oldRoom).emit('screenshare-stopped', { sharerId: socket.id });
-          }
-          // Update their sharing room and notify new room that sharing is active
-          activeScreenSharers.set(socket.id, { room: data.room, startedAt: Date.now() });
-          io.to(data.room).emit('screenshare-started', { sharerId: socket.id, name: user.name, avatar: user.avatar });
-          // Reset watchers in new room
-          watchersBySharer.set(socket.id, new Set());
-          emitWatchers(io, socket.id);
-        }
+      // Broadcast movement globally so everyone updates their room view
+      io.emit('user-moved', {
+        id: socket.id,
+        position: data.position,
+        room: data.room,
+        presence: user.presence || 'available'
+      });
 
-        // If this user currently has mic on, update their room and notify both rooms
-        if (activeAudioSpeakers.has(socket.id)) {
-          // Notify old room that audio stopped there
-          if (oldRoom) {
-            io.to(oldRoom).emit('audio-stopped', { speakerId: socket.id });
-          }
-          // Update their audio room and notify new room that audio is active
-          activeAudioSpeakers.set(socket.id, { room: data.room, startedAt: Date.now() });
-          io.to(data.room).emit('audio-started', { speakerId: socket.id, name: user.name, avatar: user.avatar });
-        }
+      // Send ALL online users to the user for directory freshness
+      const allOnlineOnes = Array.from(connectedUsers.values());
+      socket.emit('online-users', allOnlineOnes);
 
-        // If this user currently broadcasting camera, update their room and notify both rooms
-        if (activeVideoBroadcasters.has(socket.id)) {
-          if (oldRoom) {
-            io.to(oldRoom).emit('video-stopped', { broadcasterId: socket.id });
-          }
-          activeVideoBroadcasters.set(socket.id, { room: data.room, startedAt: Date.now() });
-          io.to(data.room).emit('video-started', { broadcasterId: socket.id, name: user.name, avatar: user.avatar });
+      // If this user is currently sharing, update their room and notify both rooms
+      if (activeScreenSharers.has(socket.id)) {
+        // Notify old room that sharing stopped there
+        if (oldRoom) {
+          io.to(oldRoom).emit('screenshare-stopped', { sharerId: socket.id });
         }
-      } else {
-        // Broadcast movement to current room
-        io.to(data.room).emit('user-moved', {
-          id: socket.id,
-          position: data.position,
-          room: data.room,
-          presence: user.presence || 'available'
-        });
-        // If presence changed, also broadcast a dedicated event
-        if ((user.presence || 'available') !== oldPresence) {
-          io.to(data.room).emit('presence-changed', { id: socket.id, presence: user.presence || 'available' });
+        // Update their sharing room and notify new room that sharing is active
+        activeScreenSharers.set(socket.id, { room: data.room, startedAt: Date.now() });
+        io.to(data.room).emit('screenshare-started', { sharerId: socket.id, name: user.name, avatar: user.avatar });
+        // Reset watchers in new room
+        watchersBySharer.set(socket.id, new Set());
+        emitWatchers(io, socket.id);
+      }
+
+      // If this user currently has mic on, update their room and notify both rooms
+      if (activeAudioSpeakers.has(socket.id)) {
+        // Notify old room that audio stopped there
+        if (oldRoom) {
+          io.to(oldRoom).emit('audio-stopped', { speakerId: socket.id });
         }
+        // Update their audio room and notify new room that audio is active
+        activeAudioSpeakers.set(socket.id, { room: data.room, startedAt: Date.now() });
+        io.to(data.room).emit('audio-started', { speakerId: socket.id, name: user.name, avatar: user.avatar });
+      }
+
+      // If this user currently broadcasting camera, update their room and notify both rooms
+      if (activeVideoBroadcasters.has(socket.id)) {
+        if (oldRoom) {
+          io.to(oldRoom).emit('video-stopped', { broadcasterId: socket.id });
+        }
+        activeVideoBroadcasters.set(socket.id, { room: data.room, startedAt: Date.now() });
+        io.to(data.room).emit('video-started', { broadcasterId: socket.id, name: user.name, avatar: user.avatar });
       }
     }
   });
@@ -793,7 +780,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const user = connectedUsers.get(socket.id);
     if (user) {
-      io.to(user.room).emit('user-left', socket.id);
+      io.emit('user-left', socket.id);
       connectedUsers.delete(socket.id);
     }
     // optional: emit presence offline to room

@@ -8,6 +8,7 @@ import Controls from './components/Controls';
 import ChatPanel from './components/ChatPanel';
 import RoomInfo from './components/RoomInfo';
 import Avatar from './components/Avatar';
+import MemberList from './components/MemberList';
 import { officeLayout, officeObjects } from './data/officeData';
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
   const [dmPeerId, setDmPeerId] = useState(null);
   const [unreadByUserId, setUnreadByUserId] = useState({});
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isMemberListOpen, setIsMemberListOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
   // Throttle user-moved updates to reduce re-renders on mobile
@@ -591,7 +593,7 @@ function App() {
       }
     };
     const onPresenceChanged = ({ id, presence }) => setUsers(prev => prev.map(u => u.id === id ? { ...u, presence: presence || 'available' } : u));
-    const onRoomUsers = (roomUsers) => setUsers(roomUsers.filter(u => u.id !== socket.id));
+    const onOnlineUsers = (allUsers) => setUsers(allUsers.filter(u => u.id !== socket.id));
     const onAvatarUpdated = ({ id, avatar }) => {
       setUsers(prev => prev.map(u => u.id === id ? { ...u, avatar } : u));
       if (id === socket.id) setUser(prev => prev ? { ...prev, avatar } : null);
@@ -600,7 +602,7 @@ function App() {
     socket.on('user-joined', onJoined);
     socket.on('user-left', onLeft);
     socket.on('user-moved', onMoved);
-    socket.on('room-users', onRoomUsers);
+    socket.on('online-users', onOnlineUsers);
     socket.on('presence-changed', onPresenceChanged);
     socket.on('user-avatar-updated', onAvatarUpdated);
 
@@ -611,7 +613,7 @@ function App() {
       socket.off('user-joined', onJoined);
       socket.off('user-left', onLeft);
       socket.off('user-moved', onMoved);
-      socket.off('room-users', onRoomUsers);
+      socket.off('online-users', onOnlineUsers);
       socket.off('presence-changed', onPresenceChanged);
       socket.off('user-avatar-updated', onAvatarUpdated);
     };
@@ -1420,6 +1422,14 @@ function App() {
     addToast('👋 Wave sent!', 'info');
   };
 
+  const handleOpenDm = (peerUserId) => {
+    setIsChatOpen(true);
+    setDmPeerId(peerUserId);
+    loadDmHistory(peerUserId);
+    setUnreadByUserId(prev => ({ ...prev, [peerUserId]: 0 }));
+    setIsMemberListOpen(false); // Close member list when opening DM
+  };
+
   const handleRoomChange = (newRoom) => {
     // Ensure user is muted and media is stopped when changing rooms
     try {
@@ -1687,6 +1697,7 @@ function App() {
         currentRoom={currentRoom}
         userCount={users.length + (user ? 1 : 0)}
         isConnected={isConnected}
+        onToggleMemberList={() => setIsMemberListOpen(!isMemberListOpen)}
       />
 
       {/* Nearby users top bar with scroll */}
@@ -1843,6 +1854,17 @@ function App() {
             setUnreadByUserId(prev => ({ ...prev, [peerId]: 0 }));
           }}
           onClose={() => setIsChatOpen(false)}
+        />
+      )}
+
+      {isMemberListOpen && (
+        <MemberList
+          onClose={() => setIsMemberListOpen(false)}
+          onlineUsers={[...(user ? [user] : []), ...users]}
+          allUsers={directory}
+          onWave={sendWave}
+          onMessage={handleOpenDm}
+          currentUser={user}
         />
       )}
 

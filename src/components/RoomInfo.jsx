@@ -1,7 +1,7 @@
 import React from 'react';
 import { officeLayout } from '../data/officeData';
 
-const RoomInfo = ({ currentRoom, userCount, isConnected }) => {
+const RoomInfo = ({ currentRoom, userCount, isConnected, onToggleMemberList }) => {
   const currentRoomData = officeLayout[currentRoom];
 
   return (
@@ -16,7 +16,12 @@ const RoomInfo = ({ currentRoom, userCount, isConnected }) => {
         </span>
       </div>
       <div className="ri-body">
-        <div className="ri-item" title="Users online">
+        <div
+          className="ri-item clickable"
+          title="View all members"
+          onClick={onToggleMemberList}
+          style={{ cursor: 'pointer' }}
+        >
           <span className="ri-item-icon" aria-hidden>👥</span>
           <span className="ri-item-text">{userCount} online</span>
         </div>

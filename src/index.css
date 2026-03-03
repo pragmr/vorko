@@ -1182,3 +1182,96 @@ body {
 .meet-btn.active { background: #1F2937; color: #E5E7EB; border-color: rgba(255,255,255,0.22); }
 .meet-btn.danger { background: #ef4444; color: #fff; border-color: rgba(239,68,68,0.6); }
 .meet-btn.danger:hover { background: #dc2626; }
+/* Member List Panel */
+.member-list-panel {
+  width: 320px;
+}
+.member-section-title {
+  padding: 16px 16px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #9CA3AF;
+  letter-spacing: 0.5px;
+}
+.member-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  transition: background 0.2s ease;
+}
+.member-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.member-item.offline {
+  opacity: 0.7;
+}
+.member-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.member-details {
+  display: flex;
+  flex-direction: column;
+}
+.member-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #F3F4F6;
+}
+.member-room, .member-status {
+  font-size: 11px;
+  color: #9CA3AF;
+}
+.status-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #14110F;
+}
+.status-indicator.online {
+  background: #10B981;
+}
+.status-indicator.offline {
+  background: #6B7280;
+}
+.member-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.member-item:hover .member-actions {
+  opacity: 1;
+}
+.member-action-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #F3F4F6;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+.member-action-btn:hover {
+  background: rgba(100, 255, 218, 0.15);
+  border-color: #64ffda;
+  color: #64ffda;
+  transform: translateY(-1px);
+}
+.member-empty {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #6B7280;
+  font-style: italic;
+}
