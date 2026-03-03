@@ -384,15 +384,20 @@ body {
   transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.9);
   color: white;
-  padding: 3px 6px;
-  border-radius: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
   font-size: 10px;
+  font-weight: 600;
   white-space: nowrap;
   opacity: 1; /* always visible */
   transition: opacity 0.3s ease;
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 1001; /* Ensure above character */
 }
 
 .controls {

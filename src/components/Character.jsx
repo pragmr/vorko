@@ -39,7 +39,7 @@ const Character = memo(function Character({ user, onMove, isCurrentUser, showRad
 
       if (newPos.x !== currentPos.x || newPos.y !== currentPos.y) {
         // notify parent that manual movement was initiated (to cancel auto-walk, etc.)
-        try { onManualMove?.(); } catch {}
+        try { onManualMove?.(); } catch { }
         onMove(newPos);
       }
     };
@@ -71,6 +71,11 @@ const Character = memo(function Character({ user, onMove, isCurrentUser, showRad
         />
       )}
 
+      <div className="character-name">
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: presenceColor }} />
+        {user.name}
+      </div>
+
       <div
         ref={characterRef}
         className={`character${isWalking ? ' walking' : ''}`}
@@ -79,7 +84,6 @@ const Character = memo(function Character({ user, onMove, isCurrentUser, showRad
           border: isCurrentUser ? '3px solid #64FFDA' : '2px solid #ffffff',
           boxShadow: isSharingActive ? '0 0 0 2px rgba(239,68,68,0.9), 0 0 18px rgba(239,68,68,0.7)' : undefined
         }}
-        title={user.name}
         onClick={onClick}
       >
         {isAvatarImage(user.avatar) ? (
@@ -87,10 +91,6 @@ const Character = memo(function Character({ user, onMove, isCurrentUser, showRad
         ) : (
           <span style={{ backgroundColor: getAvatarColorFromName(user.name), color: '#fff', fontWeight: 700, fontSize: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', borderRadius: 'inherit' }}>{getInitials(user.name)}</span>
         )}
-        <div className="character-name" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 8, height: 8, borderRadius: 999, background: presenceColor }} />
-          {user.name}
-        </div>
         {isSharingActive && (
           <div style={{ position: 'absolute', top: -8, right: -8, width: 14, height: 14, background: '#EF4444', borderRadius: '50%', border: '2px solid #111' }} />
         )}
