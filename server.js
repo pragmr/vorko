@@ -20,7 +20,9 @@ const io = socketIo(server, {
   cors: {
     origin: (origin, callback) => callback(null, true),
     methods: ["GET", "POST"],
-  }
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 app.use(cors({ origin: true }));

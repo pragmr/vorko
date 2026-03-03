@@ -13,10 +13,14 @@ import { officeLayout, officeObjects } from './data/officeData';
 function App() {
   const [socket, setSocket] = useState(null);
   const [user, setUser] = useState(null);
+  const userRef = useRef(null);
+  useEffect(() => { userRef.current = user; }, [user]);
   const [users, setUsers] = useState([]);
   const [roomMessages, setRoomMessages] = useState([]);
   const [dmMessages, setDmMessages] = useState({}); // { [peerUserId]: Message[] }
   const [currentRoom, setCurrentRoom] = useState('main-office');
+  const roomRef = useRef('main-office');
+  useEffect(() => { roomRef.current = currentRoom; }, [currentRoom]);
   const [isConnected, setIsConnected] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [account, setAccount] = useState(null);
@@ -539,6 +543,16 @@ function App() {
     newSocket.on('connect', () => {
       setIsConnected(true);
       console.log('Connected to server');
+      // Auto-rejoin if we already have a user session (persists across intermittent socket drops)
+      if (userRef.current) {
+        const updatedUser = {
+          ...userRef.current,
+          id: newSocket.id, // Update with the new socket ID
+          room: roomRef.current
+        };
+        setUser(updatedUser);
+        newSocket.emit('join-office', updatedUser);
+      }
     });
 
     newSocket.on('disconnect', () => {
