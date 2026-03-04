@@ -1,4 +1,4 @@
-# Vorko
+# Connect
 
 A **virtual office** with movable characters and real-time collaboration: room chat, DMs, proximity-based voice, video, and screen sharing.
 
@@ -99,7 +99,7 @@ Then open **http://localhost:5000**. The Express server serves the built app fro
 ## Project layout
 
 ```
-vorko/
+connect/
 ├── public/           # Static assets
 ├── src/
 │   ├── main.jsx     # Entry point

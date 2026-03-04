@@ -1,7 +1,7 @@
 {
-  "name": "vorko",
+  "name": "connect",
   "version": "1.0.0",
-  "description": "Vorko — a virtual office with movable characters and real-time collaboration",
+  "description": "Connect — a virtual office with movable characters and real-time collaboration",
   "main": "index.js",
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=\"--no-deprecation\" vite",
@@ -28,7 +28,7 @@
     "vite": "^4.4.9"
   },
   "keywords": [
-    "vorko",
+    "connect",
     "virtual-office",
     "remote-work",
     "collaboration"

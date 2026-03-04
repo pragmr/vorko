@@ -48,7 +48,7 @@ export default function Auth({ onAuthSuccess }) {
       <div className="auth-card">
         <div className="auth-header">
           <div className="auth-title">{mode === 'login' ? 'Welcome back' : 'Create your account'}</div>
-          <div className="auth-subtitle">Vorko</div>
+          <div className="auth-subtitle">Connect</div>
         </div>
         {error && (
           <div className="auth-error">{error}</div>

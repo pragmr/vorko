@@ -1,4 +1,4 @@
-# Agent guide — Vorko
+# Agent guide — Connect
 
 This file helps AI agents (and developers) understand the codebase and work on it correctly.
 
@@ -6,7 +6,7 @@ This file helps AI agents (and developers) understand the codebase and work on i
 
 ## Project summary
 
-**Vorko** is a virtual office web app: 2D grid, movable avatars, room chat, DMs, and **proximity-based** voice, video, and screen sharing. Media is **WebRTC P2P**; **Socket.IO** is used only for signaling. LiveKit is present (token API on server, client commented out) but **not used** for the current call flows.
+**Connect** is a virtual office web app: 2D grid, movable avatars, room chat, DMs, and **proximity-based** voice, video, and screen sharing. Media is **WebRTC P2P**; **Socket.IO** is used only for signaling. LiveKit is present (token API on server, client commented out) but **not used** for the current call flows.
 
 ---
 

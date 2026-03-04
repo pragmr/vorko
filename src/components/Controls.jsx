@@ -24,7 +24,7 @@ const Controls = ({ onJoinOffice, onRoomChange, currentRoom, user, account, coll
     });
   };
 
-  /* After join, office control panel not needed — only show Join Vorko until user joins */
+  /* After join, office control panel not needed — only show Join Connect until user joins */
   if (user) {
     return null;
   }
@@ -63,7 +63,7 @@ const Controls = ({ onJoinOffice, onRoomChange, currentRoom, user, account, coll
   return (
     <div className="controls">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <h3>Join Vorko</h3>
+        <h3>Join Connect</h3>
         <button className="panel-close" onClick={onToggle} aria-label={collapsed ? 'Open controls' : 'Close controls'}>{collapsed ? '⚙' : '✕'}</button>
       </div>
       {collapsed ? null : (
