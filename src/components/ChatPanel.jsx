@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Avatar from './Avatar';
 
 const ChatPanel = ({
   messages,
@@ -93,7 +94,7 @@ const ChatPanel = ({
                     borderRadius: 10
                   }}
                 >
-                  <span style={{ fontSize: 18, width: 26, textAlign: 'center' }}>{u.avatar || '👤'}</span>
+                  <Avatar name={u.name} avatar={u.avatar} size={26} />
                   <span style={{ fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name}</span>
                   {unread > 0 && (
                     <span style={{ background: '#4F46E5', color: '#fff', borderRadius: 999, padding: '2px 6px', fontSize: 12, fontWeight: 700 }}>{unread}</span>

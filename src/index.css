@@ -59,16 +59,15 @@ body {
   box-shadow: 0 0 0 2px rgba(100, 255, 218, 0.2);
 }
 
-.avatar-emoji { font-size: 18px; }
-
 .office-container {
   width: 100vw;
   height: 100vh;
   position: relative;
-  /* Forest twilight gradient */
-  background: radial-gradient(1200px 800px at 20% -10%, #0d2a21 0%, rgba(13, 42, 33, 0.6) 50%, transparent 70%),
-              radial-gradient(1000px 700px at 85% -5%, #0a2921 0%, rgba(10, 41, 33, 0.5) 55%, transparent 75%),
-              linear-gradient(180deg, #0b1d16 0%, #061f17 100%);
+  /* Greenery tiled outside office; fallback and overlay gradient */
+  background-color: #1e2a1c;
+  background-image: url('/greenery-bg.png');
+  background-repeat: repeat;
+  background-size: 500px 500px;
   overflow: hidden;
 }
 
@@ -139,12 +138,42 @@ body {
   100% { transform: translateX(3px) skewX(0.8deg); }
 }
 
+/* Mobile: disable heavy animations and backdrop-filter to prevent Chrome from stalling */
+@media (max-width: 768px), (prefers-reduced-motion: reduce) {
+  .office-container::before,
+  .office-container::after {
+    animation: none !important;
+  }
+  .zoom-controls,
+  .controls,
+  .character-name,
+  .auth-card,
+  .user-menu,
+  .meet-controls {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(10, 12, 11, 0.92);
+  }
+  .office-grid {
+    transition: none;
+  }
+  .office-tile:hover {
+    transform: none;
+  }
+  .character {
+    transition: transform 0.2s ease;
+  }
+}
+
 .office-grid-container {
   width: 100%;
   height: 100%;
   position: relative;
   overflow: hidden;
-  /* Transparent to reveal forest background outside the office grid */
+  /* Center the office grid so greenery shows in empty space around it */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   pointer-events: none;
 }
@@ -212,11 +241,15 @@ body {
 
 .office-grid {
   display: grid;
+  /* Size to aspect ratio so greenery shows around the room; aspect-ratio set inline from layout */
   width: 100%;
-  height: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
   position: relative;
   transition: transform 0.1s ease;
   pointer-events: auto;
+  flex-shrink: 0;
 }
 
 .office-tile {
@@ -268,6 +301,11 @@ body {
   transform: scale(1.02);
 }
 
+.office-tile.floor:hover {
+  border-color: #D2B48C;
+  transform: none;
+}
+
 .office-tile.desk {
   background: #3a3a5a;
   border-color: #5a5a7a;
@@ -283,6 +321,20 @@ body {
   border-color: #a0522d;
 }
 
+/* When using a custom office background image, only floor tiles are transparent so the image shows; wall stays visible */
+.office-tile.office-tile--transparent,
+.office-grid--image-bg .office-tile.floor {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+.office-grid--image-bg .office-tile.floor::before {
+  display: none;
+}
+.office-grid--image-bg .office-tile.floor:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
 .office-tile.window {
   background: #87ceeb;
   border-color: #98d8e8;
@@ -290,21 +342,22 @@ body {
 
 .character {
   position: absolute;
-  width: 42px;
-  height: 42px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
-  font-size: 18px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.3s ease;
   z-index: 1000;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   background: linear-gradient(135deg, #64ffda, #4cd6b3);
   color: #0f0f23;
-  border: 3px solid #64ffda;
+  border: 2px solid #64ffda;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   pointer-events: auto;
 }
@@ -326,20 +379,25 @@ body {
 
 .character-name {
   position: absolute;
-  top: -30px;
+  top: -22px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.9);
   color: white;
-  padding: 6px 10px;
+  padding: 3px 8px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 10px;
+  font-weight: 600;
   white-space: nowrap;
   opacity: 1; /* always visible */
   transition: opacity 0.3s ease;
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 1001; /* Ensure above character */
 }
 
 .controls {
@@ -425,9 +483,9 @@ body {
   box-shadow: 0 12px 30px rgba(0,0,0,0.4);
   overflow: hidden;
 }
-.user-menu-header { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-.user-menu-avatar { font-size: 24px; }
-.user-menu-name { font-weight: 700; color: #F3F4F6; margin-top: 6px; }
+.user-menu-header { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; gap: 12px; }
+.user-menu-avatar { flex-shrink: 0; }
+.user-menu-name { font-weight: 700; color: #F3F4F6; margin-top: 0; }
 .user-menu-email { color: #9CA3AF; font-size: 12px; margin-top: 2px; }
 .user-menu-actions { display: grid; padding: 8px; gap: 6px; }
 .user-menu-item {
@@ -947,7 +1005,7 @@ body {
   padding: 8px;
 }
 .ss-avatar-name { color: #fff; font-size: 12px; font-weight: 700; }
-.ss-avatar-emoji { font-size: 22px; }
+.ss-avatar-inner { flex-shrink: 0; }
 .ss-viewers-more {
   border: 1px solid rgba(255,255,255,0.2);
   background: rgba(255,255,255,0.08);
@@ -1020,7 +1078,7 @@ body {
   font-weight: 700;
 }
 .ss-switcher-item.active { border-color: #64FFDA; box-shadow: 0 0 0 2px rgba(100,255,218,0.18) inset; }
-.ss-switcher-emoji { font-size: 18px; }
+.ss-switcher-avatar { flex-shrink: 0; }
 .ss-switcher-name { font-size: 12px; max-width: 120px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 
 .ss-toolbar {
@@ -1129,3 +1187,96 @@ body {
 .meet-btn.active { background: #1F2937; color: #E5E7EB; border-color: rgba(255,255,255,0.22); }
 .meet-btn.danger { background: #ef4444; color: #fff; border-color: rgba(239,68,68,0.6); }
 .meet-btn.danger:hover { background: #dc2626; }
+/* Member List Panel */
+.member-list-panel {
+  width: 320px;
+}
+.member-section-title {
+  padding: 16px 16px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #9CA3AF;
+  letter-spacing: 0.5px;
+}
+.member-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  transition: background 0.2s ease;
+}
+.member-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.member-item.offline {
+  opacity: 0.7;
+}
+.member-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.member-details {
+  display: flex;
+  flex-direction: column;
+}
+.member-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #F3F4F6;
+}
+.member-room, .member-status {
+  font-size: 11px;
+  color: #9CA3AF;
+}
+.status-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #14110F;
+}
+.status-indicator.online {
+  background: #10B981;
+}
+.status-indicator.offline {
+  background: #6B7280;
+}
+.member-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.member-item:hover .member-actions {
+  opacity: 1;
+}
+.member-action-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #F3F4F6;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+.member-action-btn:hover {
+  background: rgba(100, 255, 218, 0.15);
+  border-color: #64ffda;
+  color: #64ffda;
+  transform: translateY(-1px);
+}
+.member-empty {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #6B7280;
+  font-style: italic;
+}

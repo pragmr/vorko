@@ -20,11 +20,13 @@ const io = socketIo(server, {
   cors: {
     origin: (origin, callback) => callback(null, true),
     methods: ["GET", "POST"],
-  }
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 app.use(cors({ origin: true }));
-app.use(express.json());
+app.use(express.json({ limit: '6mb' }));
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- Simple JSON file store for user accounts (no native build needed) ---
@@ -44,6 +46,13 @@ if (!fs.existsSync(roomMessagesFile)) {
 if (!fs.existsSync(dmMessagesFile)) {
   fs.writeFileSync(dmMessagesFile, JSON.stringify({}, null, 2));
 }
+
+// Profile uploads (avatar images)
+const uploadsDir = path.join(dataDir, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
 
 function readUsers() {
   try {
@@ -141,6 +150,52 @@ app.get('/api/auth/me', (req, res) => {
   return res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
 });
 
+// --- Profile avatar upload (base64 data URL) ---
+const ALLOWED_MIMES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp' };
+const MAX_AVATAR_BASE64 = 5 * 1024 * 1024; // 5MB
+
+app.post('/api/profile/avatar', (req, res) => {
+  const payload = verifyAuthHeader(req);
+  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
+  const user = findUserById(payload.userId);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const dataUrl = req.body?.avatar;
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'Invalid avatar: expected data URL (data:image/...)' });
+  }
+  const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+  if (!match) return res.status(400).json({ error: 'Invalid avatar format' });
+  const mime = match[1];
+  const ext = ALLOWED_MIMES[mime];
+  if (!ext) return res.status(400).json({ error: 'Allowed types: JPEG, PNG, GIF, WebP' });
+  const base64 = match[2];
+  if (Buffer.byteLength(base64, 'utf8') > MAX_AVATAR_BASE64) {
+    return res.status(400).json({ error: 'Image too large (max 5MB)' });
+  }
+  let buf;
+  try {
+    buf = Buffer.from(base64, 'base64');
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid base64' });
+  }
+  const safeId = String(user.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `avatar-${safeId}.${ext}`;
+  const filepath = path.join(uploadsDir, filename);
+  try {
+    fs.writeFileSync(filepath, buf);
+  } catch (e) {
+    return res.status(500).json({ error: 'Failed to save image' });
+  }
+  const avatarUrl = `/uploads/${filename}`;
+  const users = readUsers();
+  const idx = users.findIndex(u => String(u.id) === String(user.id));
+  if (idx === -1) return res.status(500).json({ error: 'User not found' });
+  users[idx].avatar = avatarUrl;
+  writeUsers(users);
+  return res.json({ user: { id: user.id, email: user.email, name: user.name, avatar: avatarUrl } });
+});
+
 // --- Utility: messages storage ---
 function readRoomMessages() {
   try {
@@ -172,7 +227,7 @@ function conversationKey(userIdA, userIdB) {
 
 // --- Public user directory (sanitized) ---
 app.get('/api/users', (req, res) => {
-  const users = readUsers().map(u => ({ id: u.id, name: u.name, avatar: u.avatar || '👤', email: u.email }));
+  const users = readUsers().map(u => ({ id: u.id, name: u.name, avatar: u.avatar || '', email: u.email }));
   res.json({ users });
 });
 
@@ -299,7 +354,7 @@ function emitWatchers(io, sharerId) {
       .filter(Boolean)
       .map((u) => ({ id: u.id, name: u.name, avatar: u.avatar }));
     io.to(room).emit('screenshare-watchers', { sharerId, watchers });
-  } catch {}
+  } catch { }
 }
 
 // Require auth via JWT in socket handshake
@@ -323,7 +378,7 @@ io.on('connection', (socket) => {
   socket.on('join-office', (userData) => {
     const dbUser = findUserById(socket.data.userId);
     const name = dbUser?.name || socket.data.name || userData.name;
-    const avatar = userData.avatar || dbUser?.avatar || '👤';
+    const avatar = (userData.avatar || dbUser?.avatar || '').trim();
     connectedUsers.set(socket.id, {
       id: socket.id,
       userId: socket.data.userId,
@@ -333,10 +388,10 @@ io.on('connection', (socket) => {
       room: userData.room,
       presence: userData.presence || 'available'
     });
-    
-    // Broadcast to all users in the same room
+
+    // Broadcast to all users (global presence)
     socket.join(userData.room);
-    io.to(userData.room).emit('user-joined', {
+    io.emit('user-joined', {
       id: socket.id,
       userId: socket.data.userId,
       name,
@@ -345,10 +400,10 @@ io.on('connection', (socket) => {
       room: userData.room,
       presence: userData.presence || 'available'
     });
-    
-    // Send current users in the room to the new user
-    const roomUsers = Array.from(connectedUsers.values()).filter(user => user.room === userData.room);
-    socket.emit('room-users', roomUsers);
+
+    // Send ALL online users to the new user
+    const allOnlineUsers = Array.from(connectedUsers.values());
+    socket.emit('online-users', allOnlineUsers);
 
     // Also send which users are currently sharing screens in this room
     const roomSharers = Array.from(activeScreenSharers.entries())
@@ -369,6 +424,17 @@ io.on('connection', (socket) => {
     socket.emit('video-active', { broadcasterIds: roomVideo });
   });
 
+  // Update avatar in real time (after profile upload)
+  socket.on('update-avatar', (data) => {
+    const user = connectedUsers.get(socket.id);
+    if (!user || !data || typeof data.avatar !== 'string') return;
+    const avatar = data.avatar.trim();
+    user.avatar = avatar;
+    if (user.room) {
+      io.to(user.room).emit('user-avatar-updated', { id: socket.id, avatar });
+    }
+  });
+
   // Handle user movement
   socket.on('user-move', (data) => {
     const user = connectedUsers.get(socket.id);
@@ -383,67 +449,54 @@ io.on('connection', (socket) => {
       if (oldRoom !== data.room) {
         if (oldRoom) {
           socket.leave(oldRoom);
-          io.to(oldRoom).emit('user-left', socket.id);
         }
         socket.join(data.room);
-        io.to(data.room).emit('user-joined', {
-          id: socket.id,
-          userId: user.userId,
-          name: user.name,
-          avatar: user.avatar,
-          position: data.position,
-          room: data.room,
-          presence: user.presence || 'available'
-        });
-        // Send current users in the new room to the switching user
-        const roomUsers = Array.from(connectedUsers.values()).filter(u => u.room === data.room && u.id !== socket.id);
-        socket.emit('room-users', roomUsers);
+      }
 
-        // If this user is currently sharing, update their room and notify both rooms
-        if (activeScreenSharers.has(socket.id)) {
-          // Notify old room that sharing stopped there
-          if (oldRoom) {
-            io.to(oldRoom).emit('screenshare-stopped', { sharerId: socket.id });
-          }
-          // Update their sharing room and notify new room that sharing is active
-          activeScreenSharers.set(socket.id, { room: data.room, startedAt: Date.now() });
-          io.to(data.room).emit('screenshare-started', { sharerId: socket.id, name: user.name, avatar: user.avatar });
-          // Reset watchers in new room
-          watchersBySharer.set(socket.id, new Set());
-          emitWatchers(io, socket.id);
-        }
+      // Broadcast movement globally so everyone updates their room view
+      io.emit('user-moved', {
+        id: socket.id,
+        position: data.position,
+        room: data.room,
+        presence: user.presence || 'available'
+      });
 
-        // If this user currently has mic on, update their room and notify both rooms
-        if (activeAudioSpeakers.has(socket.id)) {
-          // Notify old room that audio stopped there
-          if (oldRoom) {
-            io.to(oldRoom).emit('audio-stopped', { speakerId: socket.id });
-          }
-          // Update their audio room and notify new room that audio is active
-          activeAudioSpeakers.set(socket.id, { room: data.room, startedAt: Date.now() });
-          io.to(data.room).emit('audio-started', { speakerId: socket.id, name: user.name, avatar: user.avatar });
-        }
+      // Send ALL online users to the user for directory freshness
+      const allOnlineOnes = Array.from(connectedUsers.values());
+      socket.emit('online-users', allOnlineOnes);
 
-        // If this user currently broadcasting camera, update their room and notify both rooms
-        if (activeVideoBroadcasters.has(socket.id)) {
-          if (oldRoom) {
-            io.to(oldRoom).emit('video-stopped', { broadcasterId: socket.id });
-          }
-          activeVideoBroadcasters.set(socket.id, { room: data.room, startedAt: Date.now() });
-          io.to(data.room).emit('video-started', { broadcasterId: socket.id, name: user.name, avatar: user.avatar });
+      // If this user is currently sharing, update their room and notify both rooms
+      if (activeScreenSharers.has(socket.id)) {
+        // Notify old room that sharing stopped there
+        if (oldRoom) {
+          io.to(oldRoom).emit('screenshare-stopped', { sharerId: socket.id });
         }
-      } else {
-        // Broadcast movement to current room
-        io.to(data.room).emit('user-moved', {
-          id: socket.id,
-          position: data.position,
-          room: data.room,
-          presence: user.presence || 'available'
-        });
-        // If presence changed, also broadcast a dedicated event
-        if ((user.presence || 'available') !== oldPresence) {
-          io.to(data.room).emit('presence-changed', { id: socket.id, presence: user.presence || 'available' });
+        // Update their sharing room and notify new room that sharing is active
+        activeScreenSharers.set(socket.id, { room: data.room, startedAt: Date.now() });
+        io.to(data.room).emit('screenshare-started', { sharerId: socket.id, name: user.name, avatar: user.avatar });
+        // Reset watchers in new room
+        watchersBySharer.set(socket.id, new Set());
+        emitWatchers(io, socket.id);
+      }
+
+      // If this user currently has mic on, update their room and notify both rooms
+      if (activeAudioSpeakers.has(socket.id)) {
+        // Notify old room that audio stopped there
+        if (oldRoom) {
+          io.to(oldRoom).emit('audio-stopped', { speakerId: socket.id });
         }
+        // Update their audio room and notify new room that audio is active
+        activeAudioSpeakers.set(socket.id, { room: data.room, startedAt: Date.now() });
+        io.to(data.room).emit('audio-started', { speakerId: socket.id, name: user.name, avatar: user.avatar });
+      }
+
+      // If this user currently broadcasting camera, update their room and notify both rooms
+      if (activeVideoBroadcasters.has(socket.id)) {
+        if (oldRoom) {
+          io.to(oldRoom).emit('video-stopped', { broadcasterId: socket.id });
+        }
+        activeVideoBroadcasters.set(socket.id, { room: data.room, startedAt: Date.now() });
+        io.to(data.room).emit('video-started', { broadcasterId: socket.id, name: user.name, avatar: user.avatar });
       }
     }
   });
@@ -480,7 +533,7 @@ io.on('connection', (socket) => {
     if (!sender || !toUserId || !text || !String(text).trim()) return;
 
     const senderProfile = findUserById(sender.userId) || { name: sender.name, avatar: sender.avatar };
-    const recipientProfile = findUserById(toUserId) || { name: 'Unknown', avatar: '👤' };
+    const recipientProfile = findUserById(toUserId) || { name: 'Unknown', avatar: '' };
     const timestamp = new Date().toISOString();
 
     const message = {
@@ -563,19 +616,22 @@ io.on('connection', (socket) => {
   });
 
   // Generic WebRTC signaling relay
-  socket.on('webrtc-offer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('webrtc-offer', { from: socket.id, sdp });
+  socket.on('webrtc-offer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('webrtc-offer', { ...data, from: socket.id });
   });
 
-  socket.on('webrtc-answer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('webrtc-answer', { from: socket.id, sdp });
+  socket.on('webrtc-answer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('webrtc-answer', { ...data, from: socket.id });
   });
 
-  socket.on('webrtc-ice-candidate', ({ to, candidate }) => {
-    if (!to || !candidate) return;
-    io.to(to).emit('webrtc-ice-candidate', { from: socket.id, candidate });
+  socket.on('webrtc-ice-candidate', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('webrtc-ice-candidate', { ...data, from: socket.id });
   });
 
   // --- Proximity voice (mic) signaling (WebRTC over Socket.IO) ---
@@ -616,17 +672,20 @@ io.on('connection', (socket) => {
   });
 
   // Relay WebRTC for audio
-  socket.on('audio-webrtc-offer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('audio-webrtc-offer', { from: socket.id, sdp });
+  socket.on('audio-webrtc-offer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('audio-webrtc-offer', { ...data, from: socket.id });
   });
-  socket.on('audio-webrtc-answer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('audio-webrtc-answer', { from: socket.id, sdp });
+  socket.on('audio-webrtc-answer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('audio-webrtc-answer', { ...data, from: socket.id });
   });
-  socket.on('audio-ice-candidate', ({ to, candidate }) => {
-    if (!to || !candidate) return;
-    io.to(to).emit('audio-ice-candidate', { from: socket.id, candidate });
+  socket.on('audio-ice-candidate', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('audio-ice-candidate', { ...data, from: socket.id });
   });
 
   // --- Proximity camera video signaling (WebRTC over Socket.IO) ---
@@ -663,17 +722,20 @@ io.on('connection', (socket) => {
     io.to(broadcasterId).emit('video-unsubscribe', { from: socket.id });
   });
 
-  socket.on('video-webrtc-offer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('video-webrtc-offer', { from: socket.id, sdp });
+  socket.on('video-webrtc-offer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('video-webrtc-offer', { ...data, from: socket.id });
   });
-  socket.on('video-webrtc-answer', ({ to, sdp }) => {
-    if (!to || !sdp) return;
-    io.to(to).emit('video-webrtc-answer', { from: socket.id, sdp });
+  socket.on('video-webrtc-answer', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('video-webrtc-answer', { ...data, from: socket.id });
   });
-  socket.on('video-ice-candidate', ({ to, candidate }) => {
-    if (!to || !candidate) return;
-    io.to(to).emit('video-ice-candidate', { from: socket.id, candidate });
+  socket.on('video-ice-candidate', (data) => {
+    const { to } = data || {};
+    if (!to) return;
+    io.to(to).emit('video-ice-candidate', { ...data, from: socket.id });
   });
 
   // Wave feature: simple real-time notification
@@ -718,7 +780,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const user = connectedUsers.get(socket.id);
     if (user) {
-      io.to(user.room).emit('user-left', socket.id);
+      io.emit('user-left', socket.id);
       connectedUsers.delete(socket.id);
     }
     // optional: emit presence offline to room
@@ -745,7 +807,7 @@ io.on('connection', (socket) => {
       for (const [sid, set] of watchersBySharer.entries()) {
         if (set.delete(socket.id)) emitWatchers(io, sid);
       }
-    } catch {}
+    } catch { }
     console.log('User disconnected:', socket.id);
   });
 });

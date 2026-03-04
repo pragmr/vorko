@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, memo } from 'react';
+import { isAvatarImage, getInitials, getAvatarColorFromName } from '../utils/avatar';
 
-const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTiles = 3, isSharingActive = false, onClick, onManualMove, isWalking = false }) => {
+const Character = memo(function Character({ user, onMove, isCurrentUser, showRadius = false, radiusTiles = 3, isSharingActive = false, onClick, onManualMove, isWalking = false }) {
   const characterRef = useRef(null);
 
   useEffect(() => {
@@ -38,7 +39,7 @@ const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTile
 
       if (newPos.x !== currentPos.x || newPos.y !== currentPos.y) {
         // notify parent that manual movement was initiated (to cancel auto-walk, etc.)
-        try { onManualMove?.(); } catch {}
+        try { onManualMove?.(); } catch { }
         onMove(newPos);
       }
     };
@@ -46,20 +47,6 @@ const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTile
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [user.position, onMove, isCurrentUser]);
-
-  const getAvatarColor = (avatar) => {
-    const colors = {
-      '👨': '#4A90E2',
-      '👩': '#E91E63',
-      '👦': '#8BC34A',
-      '👧': '#FF9800',
-      '🧑': '#9C27B0',
-      '👴': '#607D8B',
-      '👵': '#FF5722',
-      '🤖': '#795548'
-    };
-    return colors[avatar] || '#64FFDA';
-  };
 
   const presence = user.presence || 'available';
   const presenceColor = presence === 'dnd' ? '#EF4444' : presence === 'busy' ? '#F59E0B' : '#10B981';
@@ -84,29 +71,32 @@ const Character = ({ user, onMove, isCurrentUser, showRadius = false, radiusTile
         />
       )}
 
+      <div className="character-name">
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: presenceColor }} />
+        {user.name}
+      </div>
+
       <div
         ref={characterRef}
         className={`character${isWalking ? ' walking' : ''}`}
         style={{
           position: 'relative',
-          backgroundColor: getAvatarColor(user.avatar),
           border: isCurrentUser ? '3px solid #64FFDA' : '2px solid #ffffff',
           boxShadow: isSharingActive ? '0 0 0 2px rgba(239,68,68,0.9), 0 0 18px rgba(239,68,68,0.7)' : undefined
         }}
-        title={user.name}
         onClick={onClick}
       >
-        {user.avatar}
-        <div className="character-name" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 8, height: 8, borderRadius: 999, background: presenceColor }} />
-          {user.name}
-        </div>
+        {isAvatarImage(user.avatar) ? (
+          <img src={user.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
+        ) : (
+          <span style={{ backgroundColor: getAvatarColorFromName(user.name), color: '#fff', fontWeight: 700, fontSize: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', borderRadius: 'inherit' }}>{getInitials(user.name)}</span>
+        )}
         {isSharingActive && (
           <div style={{ position: 'absolute', top: -8, right: -8, width: 14, height: 14, background: '#EF4444', borderRadius: '50%', border: '2px solid #111' }} />
         )}
       </div>
     </div>
   );
-};
+});
 
 export default Character;
